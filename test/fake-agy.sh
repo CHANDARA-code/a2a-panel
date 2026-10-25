@@ -8,6 +8,10 @@ case "$FAKE_AGY_MODE" in
     sleep 300 &
     exit 0
     ;;
+  chatty)
+    yes 'line of agent output' | head -n 5000
+    exit 0
+    ;;
   *)
     sleep 300 &
     wait

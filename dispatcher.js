@@ -25,6 +25,18 @@ const activeTasks = new Map();
 const TASK_ID_PATTERN = /^a2a_[\w-]+$/;
 const KILL_ESCALATION_MS = parseInt(process.env.A2A_KILL_ESCALATION_MS || '5000', 10);
 
+function envInt(name, fallback) {
+  const value = parseInt(process.env[name], 10);
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+const limits = () => ({
+  wallMs: envInt('A2A_TASK_TIMEOUT_MS', 3600000),
+  idleMs: envInt('A2A_IDLE_TIMEOUT_MS', 0),
+  maxConcurrent: envInt('A2A_MAX_CONCURRENT', 4),
+  maxOutputChars: envInt('A2A_MAX_OUTPUT_CHARS', 200000)
+});
+
 function cancelMarkerPath(taskId) {
   return path.join(LOGS_DIR, `${taskId}.cancelled`);
 }
@@ -161,6 +173,23 @@ function cancelTask(taskId) {
   return { ok: true, code: 200, id: taskId, status: 'cancelled' };
 }
 
+function countRunningTasks() {
+  let running = 0;
+  let files = [];
+  try {
+    files = fs.readdirSync(LOGS_DIR);
+  } catch (err) {
+    return 0;
+  }
+  for (const file of files) {
+    if (!file.endsWith('.pid')) continue;
+    const taskId = file.slice(0, -4);
+    const pid = readTaskPid(taskId);
+    if (pid && isTaskProcessLive(taskId, pid)) running++;
+  }
+  return running;
+}
+
 const NO_WORK_SIGNALS = /no output produced|do not have access to (?:command|file|direct)|does not provide direct file|no file[- ]write or terminal|not provisioned/i;
 
 const PLUGINS_DIR = path.join(process.env.HOME || '', '.gemini', 'config', 'plugins');
@@ -185,6 +214,13 @@ function loadRolePersona(role) {
 function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = 'high', acceptance_criteria, verification_command, onChunk, onDone, onError }) {
   if (typeof prompt !== 'string' || !prompt.trim() || prompt.trim().startsWith('--')) {
     throw new Error('Invalid task prompt: ' + JSON.stringify(prompt) + ' (empty or looks like a CLI flag)');
+  }
+  const { wallMs, idleMs, maxConcurrent, maxOutputChars } = limits();
+  if (maxConcurrent > 0) {
+    const running = countRunningTasks();
+    if (running >= maxConcurrent) {
+      throw new Error(`Concurrency limit reached: ${running} of ${maxConcurrent} agent tasks are running. Wait for one to finish or cancel one (limit set by A2A_MAX_CONCURRENT).`);
+    }
   }
   const taskId = 'a2a_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
   if (workspace && !fs.existsSync(workspace)) {
@@ -272,23 +308,70 @@ function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = '
     }
   };
   let spawnFailed = false;
+  let finished = false;
+  let lastOutputAt = Date.now();
+  taskRecord.outputChars = 0;
+  taskRecord.outputTruncated = false;
+  const timers = [];
 
-  proc.stdout.on('data', (data) => {
+  const stopTimers = () => {
+    finished = true;
+    for (const timer of timers) {
+      clearTimeout(timer);
+      clearInterval(timer);
+    }
+  };
+
+  const expire = (reason) => {
+    if (finished || taskRecord.timeoutReason) return;
+    taskRecord.timeoutReason = reason;
+    try {
+      signalTaskTree(proc.pid, 'SIGTERM');
+    } catch (err) {}
+    const escalation = setTimeout(() => {
+      if (finished) return;
+      try {
+        signalTaskTree(proc.pid, 'SIGKILL');
+      } catch (err) {}
+    }, KILL_ESCALATION_MS);
+    escalation.unref();
+    timers.push(escalation);
+  };
+
+  if (wallMs > 0) {
+    const wallTimer = setTimeout(() => expire(`Timed out after ${Math.round(wallMs / 1000)}s of wall-clock time (A2A_TASK_TIMEOUT_MS)`), wallMs);
+    wallTimer.unref();
+    timers.push(wallTimer);
+  }
+  if (idleMs > 0) {
+    const idleTimer = setInterval(() => {
+      if (Date.now() - lastOutputAt > idleMs) {
+        expire(`No output for ${Math.round(idleMs / 1000)}s (A2A_IDLE_TIMEOUT_MS)`);
+      }
+    }, Math.min(1000, idleMs));
+    idleTimer.unref();
+    timers.push(idleTimer);
+  }
+
+  const handleChunk = (data) => {
     const text = data.toString('utf-8');
+    lastOutputAt = Date.now();
+    taskRecord.outputChars += text.length;
     taskRecord.output += text;
+    if (maxOutputChars > 0 && taskRecord.output.length > maxOutputChars) {
+      taskRecord.output = taskRecord.output.slice(-maxOutputChars);
+      taskRecord.outputTruncated = true;
+    }
     logStream.write(text);
     if (onChunk) onChunk(text);
-  });
+  };
 
-  proc.stderr.on('data', (data) => {
-    const text = data.toString('utf-8');
-    taskRecord.output += text;
-    logStream.write(text);
-    if (onChunk) onChunk(text);
-  });
+  proc.stdout.on('data', handleChunk);
+  proc.stderr.on('data', handleChunk);
 
   proc.on('error', (err) => {
     spawnFailed = true;
+    stopTimers();
     taskRecord.status = 'failed';
     taskRecord.finishedAt = new Date().toISOString();
     taskRecord.error = err.message;
@@ -303,10 +386,15 @@ function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = '
 
   proc.on('close', (code) => {
     if (spawnFailed) return;
+    stopTimers();
     if (fs.existsSync(cancelMarkerPath(taskId))) taskRecord.status = 'cancelled';
     if (taskRecord.status !== 'cancelled') {
       taskRecord.status = code === 0 ? 'completed' : 'failed';
-      if (code === 0 && NO_WORK_SIGNALS.test(taskRecord.output)) {
+      if (taskRecord.timeoutReason) {
+        taskRecord.status = 'failed';
+        taskRecord.error = taskRecord.timeoutReason;
+        logStream.write(`\n[A2A] Marked failed: ${taskRecord.timeoutReason}\n`);
+      } else if (code === 0 && NO_WORK_SIGNALS.test(taskRecord.output)) {
         taskRecord.status = 'failed';
         taskRecord.error = 'Agent reported it could not edit files or run commands; no work was done';
         logStream.write('\n[A2A] Marked failed: the agent output says it had no file or shell tools.\n');

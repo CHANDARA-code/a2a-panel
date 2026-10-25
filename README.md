@@ -135,7 +135,21 @@ npm run build   # type-checks, then writes panel/dist
 - Cancel stops the whole agent process group (SIGTERM, then SIGKILL after 5 seconds). Tasks started before this version run without their own process group, so cancel stops the agent and its descendants by walking the process tree.
 - Panel dispatch defaults to "Plan only". "Edit files" lets the agent edit files and run commands in the chosen workspace.
 
-## 6. Tests
+## 6. Limits
+
+Set these environment variables for the server, the MCP server and the CLI. `0` turns a limit off.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `A2A_TASK_TIMEOUT_MS` | `3600000` (60 min) | Stops a task that runs longer than this and marks it failed. |
+| `A2A_IDLE_TIMEOUT_MS` | `0` (off) | Stops a task that prints nothing for this long. Off by default because headless `agy` can stay quiet while it works. |
+| `A2A_MAX_CONCURRENT` | `4` | Refuses a new task while this many agents are running, across the server, MCP server and CLI. |
+| `A2A_MAX_OUTPUT_CHARS` | `200000` | Output kept in memory per task. The log file under `logs/` keeps everything. |
+| `A2A_KILL_ESCALATION_MS` | `5000` | Time between SIGTERM and SIGKILL when stopping a task. |
+
+A stopped task shows `failed` with the reason (`Timed out after …` or `No output for …`).
+
+## 7. Tests
 
 ```bash
 cd ~/.a2a-antigravity

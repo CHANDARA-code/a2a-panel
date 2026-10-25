@@ -303,3 +303,60 @@ test('cancelling an unknown or malformed task id fails cleanly', async () => {
   const malformed = await fetch(`${main.base}/api/tasks/..%2f..%2fx/cancel`, { method: 'POST', headers: authed() });
   assert.ok([400, 404].includes(malformed.status));
 });
+
+test('a task past the wall-clock limit is stopped and marked failed', async () => {
+  const limited = await startInstance({ A2A_TASK_TIMEOUT_MS: '600', A2A_KILL_ESCALATION_MS: '300' });
+  const { body } = await dispatch(limited);
+  const task = await waitFor(async () => {
+    const current = await taskOf(limited, body.taskId);
+    return current.status === 'failed' ? current : null;
+  });
+  assert.match(task.error, /Timed out after/);
+});
+
+test('a task that goes silent past the idle limit is stopped and marked failed', async () => {
+  const limited = await startInstance({ A2A_IDLE_TIMEOUT_MS: '600', A2A_KILL_ESCALATION_MS: '300' });
+  const { body } = await dispatch(limited);
+  const task = await waitFor(async () => {
+    const current = await taskOf(limited, body.taskId);
+    return current.status === 'failed' ? current : null;
+  });
+  assert.match(task.error, /No output for/);
+});
+
+test('dispatch is refused once the concurrency limit is reached', async () => {
+  const capped = await startInstance({ A2A_MAX_CONCURRENT: '1' });
+  const first = await dispatch(capped);
+  assert.strictEqual(first.res.status, 202);
+  await leaderPid(capped, first.body.taskId);
+  const second = await dispatch(capped);
+  assert.strictEqual(second.res.status, 400);
+  assert.match(second.body.error, /Concurrency limit reached/);
+  await fetch(`${capped.base}/api/tasks/${first.body.taskId}/cancel`, { method: 'POST', headers: authed() });
+  await waitFor(async () => (await taskOf(capped, first.body.taskId)).status === 'cancelled');
+  const third = await dispatch(capped);
+  assert.strictEqual(third.res.status, 202);
+  await fetch(`${capped.base}/api/tasks/${third.body.taskId}/cancel`, { method: 'POST', headers: authed() });
+});
+
+test('in-memory task output is capped while the log keeps everything', async () => {
+  const script = `
+    const { runAgyTask } = require(${JSON.stringify(path.join(ROOT, 'dispatcher.js'))});
+    runAgyTask({ role: 'web-engineer', prompt: 'x', workspace: process.argv[1], onDone: (t) => {
+      const log = require('fs').readFileSync(t.logFile, 'utf-8');
+      console.log(JSON.stringify({ kept: t.output.length, total: t.outputChars, truncated: t.outputTruncated, logLength: log.length }));
+    } });
+  `;
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'a2a-cap-'));
+  const workspace = path.join(sandbox, 'ws');
+  fs.mkdirSync(workspace);
+  const out = execFileSync(process.execPath, ['-e', script, workspace], {
+    encoding: 'utf-8',
+    env: { ...process.env, A2A_LOGS_DIR: path.join(sandbox, 'logs'), AGY_BIN: FAKE_AGENT, FAKE_AGY_MODE: 'chatty', A2A_MAX_OUTPUT_CHARS: '1000' }
+  });
+  const result = JSON.parse(out.trim().split('\n').pop());
+  assert.strictEqual(result.kept, 1000);
+  assert.strictEqual(result.truncated, true);
+  assert.ok(result.total > 50000);
+  assert.ok(result.logLength > result.total);
+});

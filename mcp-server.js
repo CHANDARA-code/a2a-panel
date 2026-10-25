@@ -17,7 +17,7 @@ function tailForLeader(taskRecord) {
   const out = taskRecord.output || '';
   if (!out.trim()) return '(No output returned)';
   if (out.length <= LEADER_OUTPUT_LIMIT) return out;
-  return `[output truncated to last ${LEADER_OUTPUT_LIMIT} of ${out.length} chars; full log: ${taskRecord.logFile}]\n` + out.slice(-LEADER_OUTPUT_LIMIT);
+  return `[output truncated to last ${LEADER_OUTPUT_LIMIT} of ${taskRecord.outputChars || out.length} chars; full log: ${taskRecord.logFile}]\n` + out.slice(-LEADER_OUTPUT_LIMIT);
 }
 
 function workspaceError(workspace) {
