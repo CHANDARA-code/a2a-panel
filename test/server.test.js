@@ -351,13 +351,25 @@ test('dispatch is refused once the concurrency limit is reached', async () => {
   await fetch(`${capped.base}/api/tasks/${third.body.taskId}/cancel`, { method: 'POST', headers: authed() });
 });
 
+const waitForLog = `
+  const waitForLog = (file, done) => {
+    const started = Date.now();
+    const tick = () => {
+      const log = require('fs').readFileSync(file, 'utf-8');
+      if (log.includes('=== TASK FINISHED') || Date.now() - started > 8000) done(log);
+      else setTimeout(tick, 25);
+    };
+    tick();
+  };
+`;
+
 test('in-memory task output is capped while the log keeps everything', async () => {
   const script = `
+    ${waitForLog}
     const { runAgyTask } = require(${JSON.stringify(path.join(ROOT, 'dispatcher.js'))});
-    runAgyTask({ role: 'web-engineer', prompt: 'x', workspace: process.argv[1], onDone: (t) => {
-      const log = require('fs').readFileSync(t.logFile, 'utf-8');
+    runAgyTask({ role: 'web-engineer', prompt: 'x', workspace: process.argv[1], onDone: (t) => waitForLog(t.logFile, (log) => {
       console.log(JSON.stringify({ kept: t.output.length, total: t.outputChars, truncated: t.outputTruncated, logLength: log.length }));
-    } });
+    }) });
   `;
   const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'a2a-cap-'));
   const workspace = path.join(sandbox, 'ws');
@@ -375,10 +387,11 @@ test('in-memory task output is capped while the log keeps everything', async () 
 
 function runInProcess(mode, extraEnv = {}, taskArgs = {}) {
   const script = `
+    ${waitForLog}
     const { runAgyTask } = require(${JSON.stringify(path.join(ROOT, 'dispatcher.js'))});
-    runAgyTask({ role: 'web-engineer', prompt: 'x', workspace: process.argv[1], ...JSON.parse(process.argv[2] || '{}'), onDone: (t) => setTimeout(() => {
-      console.log(JSON.stringify({ status: t.status, error: t.error, verification: t.verification, output: t.output, usage: t.usage, conversationId: t.conversationId, changes: t.changes, log: require('fs').readFileSync(t.logFile, 'utf-8') }));
-    }, 300) });
+    runAgyTask({ role: 'web-engineer', prompt: 'x', workspace: process.argv[1], ...JSON.parse(process.argv[2] || '{}'), onDone: (t) => waitForLog(t.logFile, (log) => {
+      console.log(JSON.stringify({ status: t.status, error: t.error, verification: t.verification, output: t.output, usage: t.usage, conversationId: t.conversationId, changes: t.changes, log }));
+    }) });
   `;
   const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'a2a-run-'));
   const workspace = path.join(sandbox, 'ws');
