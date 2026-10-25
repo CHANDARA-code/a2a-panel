@@ -3,7 +3,7 @@
 ## Setup
 
 ```bash
-git clone <repo-url> agy-bridge
+git clone https://github.com/CHANDARA-code/agy-bridge.git agy-bridge
 cd agy-bridge
 npm test
 npm run build:panel

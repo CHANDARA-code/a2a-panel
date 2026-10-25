@@ -21,7 +21,7 @@ Claude Code stays the team leader: it plans, splits the work and reviews the res
 ## Install
 
 ```bash
-git clone <repo-url> agy-bridge
+git clone https://github.com/CHANDARA-code/agy-bridge.git agy-bridge
 cd agy-bridge
 npm run build:panel     # builds the web panel (optional, needed for the dashboard)
 node cli.js doctor      # checks Node, agy, sign-in, git and Claude Code
