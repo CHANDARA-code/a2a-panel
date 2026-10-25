@@ -331,6 +331,15 @@ const server = http.createServer(async (req, res) => {
         });
       }
 
+      if (rpcMethod === 'tasks/list' || rpcMethod === 'tasks.list') {
+        const wanted = params && params.status;
+        const pageSize = Math.min(Math.max(parseInt(params && params.pageSize, 10) || 50, 1), 100);
+        const tasks = dashboard.listTasks()
+          .filter((task) => !wanted || task.status === wanted)
+          .slice(0, pageSize);
+        return sendJson(res, 200, { jsonrpc: '2.0', id, result: { tasks } });
+      }
+
       // Spec method: tasks/get or tasks.get
       if (rpcMethod === 'tasks/get' || rpcMethod === 'tasks.get') {
         const taskId = params && (params.taskId || params.id);

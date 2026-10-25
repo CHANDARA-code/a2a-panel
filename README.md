@@ -134,7 +134,7 @@ When running `agy-bridge server start`:
 - **List Roles**: `GET http://127.0.0.1:5188/roles`
 - **Dispatch Task**: `POST http://127.0.0.1:5188/tasks/send`
 - **Task Status**: `GET http://127.0.0.1:5188/tasks/:id`
-- **JSON-RPC 2.0**: `POST http://127.0.0.1:5188/rpc`
+- **JSON-RPC 2.0**: `POST http://127.0.0.1:5188/rpc` with `message/send`, `tasks/get`, `tasks/list` and `tasks/cancel`. Streaming and push notifications are not implemented; the agent card says so.
 
 ---
 
@@ -178,6 +178,7 @@ Set these environment variables for the server, the MCP server and the CLI. `0` 
 | `A2A_MAX_CONCURRENT` | `4` | Refuses a new task while this many agents are running, across the server, MCP server and CLI. |
 | `A2A_MAX_OUTPUT_CHARS` | `200000` | Output kept in memory per task. The log file under `logs/` keeps everything. |
 | `A2A_KILL_ESCALATION_MS` | `5000` | Time between SIGTERM and SIGKILL when stopping a task. |
+| `A2A_LOG_RETENTION_DAYS` | `14` | Task logs older than this are deleted when a new task starts. |
 
 A stopped task shows `failed` with the reason (`Timed out after …` or `No output for …`).
 

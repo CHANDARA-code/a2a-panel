@@ -10,7 +10,7 @@
     "url": "https://antigravity.google"
   },
   "capabilities": {
-    "streaming": true,
+    "streaming": false,
     "async_tasks": true,
     "stateful_sessions": true,
     "autonomous_execution": true,

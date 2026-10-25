@@ -189,6 +189,30 @@ function cancelTask(taskId) {
   return { ok: true, code: 200, id: taskId, status: 'cancelled' };
 }
 
+const RETENTION_FILE_PATTERN = /^(a2a_[\w-]+)\.(log|cancelled)$/;
+
+function pruneOldLogs() {
+  const days = envInt('A2A_LOG_RETENTION_DAYS', 14);
+  if (days <= 0) return;
+  const cutoff = Date.now() - days * 86400000;
+  let files = [];
+  try {
+    files = fs.readdirSync(LOGS_DIR);
+  } catch (err) {
+    return;
+  }
+  for (const file of files) {
+    const match = RETENTION_FILE_PATTERN.exec(file);
+    if (!match) continue;
+    const pid = readTaskPid(match[1]);
+    if (pid && isTaskProcessLive(match[1], pid)) continue;
+    try {
+      const full = path.join(LOGS_DIR, file);
+      if (fs.statSync(full).mtimeMs < cutoff) fs.unlinkSync(full);
+    } catch (err) {}
+  }
+}
+
 function countRunningTasks() {
   let running = 0;
   let files = [];
@@ -308,6 +332,7 @@ function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = '
     throw new Error('Invalid model name');
   }
   const { wallMs, idleMs, maxConcurrent, maxOutputChars } = limits();
+  pruneOldLogs();
   if (maxConcurrent > 0) {
     const running = countRunningTasks();
     if (running >= maxConcurrent) {

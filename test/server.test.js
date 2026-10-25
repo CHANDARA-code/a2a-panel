@@ -452,3 +452,49 @@ test('doctor and init --dry-run run without touching Claude Code', () => {
   const version = execFileSync(process.execPath, [path.join(ROOT, 'cli.js'), 'version'], { encoding: 'utf-8' });
   assert.match(version.trim(), /^\d+\.\d+\.\d+$/);
 });
+
+async function instanceRpc(instance, method, params) {
+  const res = await fetch(`${instance.base}/rpc`, {
+    method: 'POST',
+    headers: authed(),
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params })
+  });
+  return res.json();
+}
+
+test('tasks/list returns recent tasks and filters by status', async () => {
+  const listed = await instanceRpc(main, 'tasks/list', {});
+  assert.ok(Array.isArray(listed.result.tasks));
+  const none = await instanceRpc(main, 'tasks/list', { status: 'no-such-status' });
+  assert.deepStrictEqual(none.result.tasks, []);
+});
+
+test('the agent card does not claim capabilities the server lacks', async () => {
+  const card = await (await fetch(`${main.base}/.well-known/agent-card.json`)).json();
+  assert.strictEqual(card.capabilities.streaming, false);
+  assert.strictEqual(card.capabilities.pushNotifications, false);
+});
+
+test('logs older than the retention window are pruned, recent ones kept', () => {
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'a2a-prune-'));
+  const logsDir = path.join(sandbox, 'logs');
+  fs.mkdirSync(logsDir);
+  const old = path.join(logsDir, 'a2a_1_old.log');
+  const recent = path.join(logsDir, 'a2a_2_recent.log');
+  fs.writeFileSync(old, 'x');
+  fs.writeFileSync(recent, 'x');
+  const longAgo = new Date(Date.now() - 40 * 86400000);
+  fs.utimesSync(old, longAgo, longAgo);
+  const workspace = path.join(sandbox, 'ws');
+  fs.mkdirSync(workspace);
+  const script = `
+    const { runAgyTask } = require(${JSON.stringify(path.join(ROOT, 'dispatcher.js'))});
+    runAgyTask({ role: 'web-engineer', prompt: 'x', workspace: process.argv[1], onDone: () => console.log('done') });
+  `;
+  execFileSync(process.execPath, ['-e', script, workspace], {
+    encoding: 'utf-8',
+    env: { ...process.env, A2A_LOGS_DIR: logsDir, AGY_BIN: FAKE_AGENT, FAKE_AGY_MODE: 'stream', A2A_LOG_RETENTION_DAYS: '14' }
+  });
+  assert.ok(!fs.existsSync(old));
+  assert.ok(fs.existsSync(recent));
+});
