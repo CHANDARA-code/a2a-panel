@@ -42,6 +42,8 @@ This system establishes an **Agent-to-Agent (A2A)** protocol connection between 
         |  [security-auditor]       OWASP audits, auth flow hardening   |
         |  [code-reviewer]          Multi-axis code review & logic      |
         |  [web-performance-auditor]Core Web Vitals & bundle profiling  |
+        |  [solution-architect]     Requirements, SRS, HLD/LLD, task plan|
+        |  [devops-engineer]        CI/CD, release, rollout, monitoring |
         |  [lead-software-engineer] Complex multi-file implementations  |
         +---------------------------------------------------------------+
 ```

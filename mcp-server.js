@@ -58,6 +58,8 @@ const TOOLS = [
             'security-auditor',
             'code-reviewer',
             'web-performance-auditor',
+            'solution-architect',
+            'devops-engineer',
             'lead-software-engineer'
           ]
         },

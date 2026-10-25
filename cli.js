@@ -38,7 +38,8 @@ Options for "a2a run":
 Available Roles:
   web-engineer, api-engineer, mobile-engineer, desktop-engineer,
   test-engineer, bug-triager, security-auditor, code-reviewer,
-  web-performance-auditor, lead-software-engineer
+  web-performance-auditor, solution-architect, devops-engineer,
+  lead-software-engineer
 `);
 }
 

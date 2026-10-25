@@ -157,6 +157,26 @@
       "agy_agent": "web-performance-auditor"
     },
     {
+      "id": "solution-architect",
+      "name": "Solution Architect & Business Analyst",
+      "description": "Turns a goal into a requirements spec (functional and non-functional), feasibility notes, and a high- and low-level design: architecture, data model, API contracts, and a task breakdown. Writes documents, not production code.",
+      "tags": ["requirements", "srs", "architecture", "design", "planning"],
+      "examples": ["Write an SRS and acceptance criteria for a multi-tenant workspace feature", "Produce HLD/LLD with data model and API contracts for a notification pipeline"],
+      "inputModes": ["application/json", "text/plain"],
+      "outputModes": ["application/json", "text/plain"],
+      "agy_agent": ""
+    },
+    {
+      "id": "devops-engineer",
+      "name": "DevOps & Release Engineer",
+      "description": "Owns deployment and operations: CI/CD pipelines, build and release automation, environment configuration, versioning, rollout and rollback plans, and monitoring setup. Flags irreversible steps before executing them.",
+      "tags": ["deployment", "ci-cd", "release", "infrastructure", "monitoring"],
+      "examples": ["Add a GitHub Actions pipeline that tests, builds and publishes a tagged release", "Write a rollout and rollback plan for the next production deploy"],
+      "inputModes": ["application/json", "text/plain"],
+      "outputModes": ["application/json", "text/plain"],
+      "agy_agent": "release-manager"
+    },
+    {
       "id": "lead-software-engineer",
       "name": "Senior Fullstack Software Architect",
       "description": "General-purpose senior developer for end-to-end multi-file features, complex system refactoring, and large-scale implementations.",
