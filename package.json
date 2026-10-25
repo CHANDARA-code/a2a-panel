@@ -2,6 +2,7 @@
   "name": "agy-bridge",
   "version": "0.1.0",
   "description": "Delegate coding work from Claude Code to a team of Google Antigravity (agy) specialists, with a web panel, token usage tracking and safe process control.",
+  "author": "leavchandara",
   "license": "MIT",
   "bin": {
     "agy-bridge": "cli.js",

@@ -425,13 +425,15 @@ function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = '
   if (conversation_id) args.push('--conversation', conversation_id);
 
   const logFilePath = path.join(LOGS_DIR, `${taskId}.log`);
+  fs.writeFileSync(logFilePath, [
+    `=== TASK STARTED: ${taskId} ===`,
+    `Role: ${role || 'lead-software-engineer'}`,
+    `Workspace: ${targetCwd}`,
+    `Started: ${new Date().toISOString()}`,
+    `Prompt:\n${finalPrompt}`,
+    `--------------------------------------------------\n\n`
+  ].join('\n'));
   const logStream = fs.createWriteStream(logFilePath, { flags: 'a' });
-  logStream.write(`=== TASK STARTED: ${taskId} ===\n`);
-  logStream.write(`Role: ${role || 'lead-software-engineer'}\n`);
-  logStream.write(`Workspace: ${targetCwd}\n`);
-  logStream.write(`Started: ${new Date().toISOString()}\n`);
-  logStream.write(`Prompt:\n${finalPrompt}\n`);
-  logStream.write(`--------------------------------------------------\n\n`);
 
   const taskRecord = {
     id: taskId,

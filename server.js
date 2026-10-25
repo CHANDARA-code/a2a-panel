@@ -404,7 +404,13 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
+
 function startServer() {
+  if (!LOOPBACK_HOSTS.has(HOST)) {
+    console.error(`[A2A Protocol Server] Refusing to listen on "${HOST}": the server hands its token to any client that can reach it, so it only binds to loopback (127.0.0.1, localhost or ::1).`);
+    process.exit(1);
+  }
   server.listen(PORT, HOST, () => {
     console.log(`[A2A Protocol Server] Listening on http://${HOST}:${PORT}`);
     console.log(`[A2A Protocol Server] Agent Card: http://${HOST}:${PORT}/.well-known/agent-card.json`);

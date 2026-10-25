@@ -542,3 +542,27 @@ test('verification is skipped when the agent itself failed', () => {
   assert.strictEqual(result.status, 'failed');
   assert.strictEqual(result.verification, null);
 });
+
+test('a task is visible through the API the instant dispatch returns', async () => {
+  const fresh = await startInstance();
+  for (let i = 0; i < 5; i++) {
+    const { res, body } = await dispatch(fresh);
+    assert.strictEqual(res.status, 202);
+    const lookup = await fetch(`${fresh.base}/api/tasks/${body.taskId}`);
+    assert.strictEqual(lookup.status, 200);
+    const { task } = await lookup.json();
+    assert.strictEqual(task.role, 'web-engineer');
+    assert.ok(task.startedAt);
+    await fetch(`${fresh.base}/api/tasks/${body.taskId}/cancel`, { method: 'POST', headers: authed() });
+  }
+});
+
+test('the server refuses to bind to a non-loopback address', () => {
+  const result = require('node:child_process').spawnSync(process.execPath, [path.join(ROOT, 'server.js')], {
+    encoding: 'utf-8',
+    timeout: 10000,
+    env: { ...process.env, A2A_HOST: '0.0.0.0', A2A_PORT: '5999', A2A_LOGS_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'a2a-host-')) }
+  });
+  assert.strictEqual(result.status, 1);
+  assert.match(result.stderr, /Refusing to listen/);
+});

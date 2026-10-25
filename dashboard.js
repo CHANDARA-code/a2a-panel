@@ -272,7 +272,7 @@ function serveStatic(res, pathname, token) {
     target = path.join(DIST_DIR, 'index.html');
   }
   if (!fs.existsSync(target)) {
-    return sendText(res, 503, 'Panel is not built. Run: cd ~/.a2a-antigravity/panel && npm install && npm run build');
+    return sendText(res, 503, 'Panel is not built. Run: npm run build:panel');
   }
 
   const type = MIME_TYPES[path.extname(target)] || 'application/octet-stream';

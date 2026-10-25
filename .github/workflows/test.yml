@@ -18,6 +18,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
+      - run: npm --prefix panel ci
+      - run: npm --prefix panel run build
       - run: npm test
   panel:
     runs-on: ubuntu-latest

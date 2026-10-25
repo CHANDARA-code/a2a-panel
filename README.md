@@ -87,16 +87,14 @@ Tasks run `agy` with `--dangerously-skip-permissions`, because headless `agy` ca
 Claude Code automatically connects to the `agy-bridge` MCP server on startup once you have run `agy-bridge init`.
 It provides Claude Code with the following tools:
 
-- `a2a_dispatch_to_antigravity(role, task_description, workspace_path, mode, effort, is_async)`
+- `a2a_dispatch_to_antigravity(role, task_description, workspace_path, mode, effort, model, conversation_id, acceptance_criteria, verification_command, is_async)`
 - `a2a_list_expert_agents()`
 - `a2a_get_task_status(task_id)`
 - `a2a_cancel_task(task_id)`
+- `a2a_validate_delivery(task_summary, acceptance_criteria, verification_command, workspace_path)`
 
 ### In Claude Code, you can:
-1. Ask Claude Code directly:
-   > "Claude, design the database schema and delegate the API endpoints implementation to the Antigravity api-engineer."
-2. Or use the slash command:
-   > `/a2a web-engineer "Create the authentication login form with Formik and Tailwind"`
+> "Design the database schema, then delegate the API endpoints to the Antigravity api-engineer and have the test-engineer cover them."
 
 ---
 
