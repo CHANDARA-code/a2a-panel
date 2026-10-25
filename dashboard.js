@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { getAgentCard, runAgyTask, cancelTask, isTaskProcessLive, LOGS_DIR, TASK_ID_PATTERN } = require('./dispatcher');
+const { getAgentCard, runAgyTask, cancelTask, isTaskProcessLive, readUsageTotals, LOGS_DIR, TASK_ID_PATTERN } = require('./dispatcher');
 
 const BASE_PATH = '/dashboard';
 const DIST_DIR = path.join(__dirname, 'panel', 'dist');
@@ -241,7 +241,9 @@ async function dispatch(req, res) {
       prompt: body.prompt,
       workspace: body.workspace,
       mode: body.mode || 'accept-edits',
-      effort: body.effort || 'high'
+      effort: body.effort || 'high',
+      model: body.model,
+      conversation_id: body.conversation_id
     });
     return sendJson(res, 202, { taskId, status: 'running' });
   } catch (err) {
@@ -313,6 +315,11 @@ async function handle(req, res, pathname, { token }) {
 
   if (method === 'GET' && pathname === '/api/roles') {
     sendJson(res, 200, { roles: listRoles(), modes: MODES, efforts: EFFORTS });
+    return true;
+  }
+
+  if (method === 'GET' && pathname === '/api/usage') {
+    sendJson(res, 200, readUsageTotals());
     return true;
   }
 

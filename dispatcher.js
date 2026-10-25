@@ -1,6 +1,7 @@
 const { spawn, execFileSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const { createStreamParser } = require('./agy-stream');
 
 const AGY_BIN = process.env.AGY_BIN || '/Users/chandara-dgc/.local/bin/agy';
 const AGENT_CARD_PATH = fs.existsSync(path.join(__dirname, 'agent-card.json'))
@@ -211,9 +212,80 @@ function loadRolePersona(role) {
   return null;
 }
 
-function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = 'high', acceptance_criteria, verification_command, onChunk, onDone, onError }) {
+const USAGE_LOG = path.join(LOGS_DIR, 'usage.jsonl');
+const CONVERSATION_ID_PATTERN = /^[A-Za-z0-9][\w-]{7,63}$/;
+const MODEL_PATTERN = /^[A-Za-z0-9][\w.:-]{0,63}$/;
+const CHANGES_LIMIT = 2000;
+
+function workspaceChanges(cwd) {
+  const run = (args) => {
+    try {
+      return execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf-8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    } catch (err) {
+      return '';
+    }
+  };
+  const status = run(['status', '--short']);
+  if (!status) return '';
+  const stat = run(['diff', '--stat']);
+  return [status, stat].filter(Boolean).join('\n\n').slice(0, CHANGES_LIMIT);
+}
+
+function recordUsage(taskRecord) {
+  if (!taskRecord.usage) return;
+  const entry = {
+    at: new Date().toISOString(),
+    taskId: taskRecord.id,
+    role: taskRecord.role,
+    status: taskRecord.status,
+    model: taskRecord.model || null,
+    conversationId: taskRecord.conversationId || null,
+    durationSeconds: taskRecord.durationSeconds || null,
+    usage: taskRecord.usage
+  };
+  try {
+    fs.appendFileSync(USAGE_LOG, JSON.stringify(entry) + '\n');
+  } catch (err) {}
+}
+
+function readUsageTotals() {
+  const totals = { tasks: 0, input_tokens: 0, output_tokens: 0, thinking_tokens: 0, cache_read_tokens: 0, total_tokens: 0, byRole: {} };
+  let lines = [];
+  try {
+    lines = fs.readFileSync(USAGE_LOG, 'utf-8').split('\n');
+  } catch (err) {
+    return totals;
+  }
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    let entry;
+    try {
+      entry = JSON.parse(line);
+    } catch (err) {
+      continue;
+    }
+    const usage = entry.usage || {};
+    totals.tasks++;
+    for (const key of ['input_tokens', 'output_tokens', 'thinking_tokens', 'cache_read_tokens', 'total_tokens']) {
+      totals[key] += Number(usage[key]) || 0;
+    }
+    const role = entry.role || 'unknown';
+    const perRole = totals.byRole[role] || (totals.byRole[role] = { tasks: 0, total_tokens: 0 });
+    perRole.tasks++;
+    perRole.total_tokens += Number(usage.total_tokens) || 0;
+  }
+  return totals;
+}
+
+function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = 'high', model, conversation_id, acceptance_criteria, verification_command, onChunk, onDone, onError }) {
   if (typeof prompt !== 'string' || !prompt.trim() || prompt.trim().startsWith('--')) {
     throw new Error('Invalid task prompt: ' + JSON.stringify(prompt) + ' (empty or looks like a CLI flag)');
+  }
+  if (conversation_id && !CONVERSATION_ID_PATTERN.test(conversation_id)) {
+    throw new Error('Invalid conversation_id');
+  }
+  if (model && !MODEL_PATTERN.test(model)) {
+    throw new Error('Invalid model name');
   }
   const { wallMs, idleMs, maxConcurrent, maxOutputChars } = limits();
   if (maxConcurrent > 0) {
@@ -255,9 +327,12 @@ function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = '
     '-p', finalPrompt,
     '--mode', mode,
     '--effort', effort,
+    '--output-format', 'stream-json',
     '--add-dir', targetCwd,
     '--dangerously-skip-permissions'
   ];
+  if (model) args.push('--model', model);
+  if (conversation_id) args.push('--conversation', conversation_id);
 
   const logFilePath = path.join(LOGS_DIR, `${taskId}.log`);
   const logStream = fs.createWriteStream(logFilePath, { flags: 'a' });
@@ -278,6 +353,10 @@ function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = '
     finishedAt: null,
     logFile: logFilePath,
     output: '',
+    model: model || null,
+    conversationId: conversation_id || null,
+    usage: null,
+    changes: '',
     error: null,
     process: null
   };
@@ -353,9 +432,7 @@ function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = '
     timers.push(idleTimer);
   }
 
-  const handleChunk = (data) => {
-    const text = data.toString('utf-8');
-    lastOutputAt = Date.now();
+  const appendOutput = (text) => {
     taskRecord.outputChars += text.length;
     taskRecord.output += text;
     if (maxOutputChars > 0 && taskRecord.output.length > maxOutputChars) {
@@ -366,8 +443,30 @@ function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = '
     if (onChunk) onChunk(text);
   };
 
-  proc.stdout.on('data', handleChunk);
-  proc.stderr.on('data', handleChunk);
+  const parser = createStreamParser({
+    onText: appendOutput,
+    onLog: (text) => logStream.write(text),
+    onInit: (conversationId) => {
+      if (conversationId) taskRecord.conversationId = conversationId;
+    },
+    onResult: (result) => {
+      taskRecord.agyStatus = result.status || null;
+      taskRecord.usage = result.usage || null;
+      taskRecord.durationSeconds = result.duration_seconds || null;
+      if (result.conversation_id) taskRecord.conversationId = result.conversation_id;
+      if (!taskRecord.output && typeof result.response === 'string') appendOutput(result.response);
+    }
+  });
+
+  proc.stdout.on('data', (data) => {
+    lastOutputAt = Date.now();
+    parser.push(data.toString('utf-8'));
+  });
+
+  proc.stderr.on('data', (data) => {
+    lastOutputAt = Date.now();
+    appendOutput(data.toString('utf-8'));
+  });
 
   proc.on('error', (err) => {
     spawnFailed = true;
@@ -387,6 +486,7 @@ function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = '
   proc.on('close', (code) => {
     if (spawnFailed) return;
     stopTimers();
+    parser.end();
     if (fs.existsSync(cancelMarkerPath(taskId))) taskRecord.status = 'cancelled';
     if (taskRecord.status !== 'cancelled') {
       taskRecord.status = code === 0 ? 'completed' : 'failed';
@@ -394,6 +494,10 @@ function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = '
         taskRecord.status = 'failed';
         taskRecord.error = taskRecord.timeoutReason;
         logStream.write(`\n[A2A] Marked failed: ${taskRecord.timeoutReason}\n`);
+      } else if (code === 0 && taskRecord.agyStatus && taskRecord.agyStatus !== 'SUCCESS') {
+        taskRecord.status = 'failed';
+        taskRecord.error = `Agent finished with status ${taskRecord.agyStatus}`;
+        logStream.write(`\n[A2A] Marked failed: ${taskRecord.error}\n`);
       } else if (code === 0 && NO_WORK_SIGNALS.test(taskRecord.output)) {
         taskRecord.status = 'failed';
         taskRecord.error = 'Agent reported it could not edit files or run commands; no work was done';
@@ -403,6 +507,8 @@ function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = '
     taskRecord.finishedAt = new Date().toISOString();
     taskRecord.exitCode = code;
     taskRecord.process = null;
+    taskRecord.changes = workspaceChanges(targetCwd);
+    recordUsage(taskRecord);
     removeProcessFiles();
     logStream.write(`\n\n=== TASK FINISHED: Exit code ${code} (${taskRecord.status}) ===\n`);
     logStream.end();
@@ -428,6 +534,8 @@ module.exports = {
   runAgyTask,
   cancelTask,
   isTaskProcessLive,
+  readUsageTotals,
+  USAGE_LOG,
   activeTasks,
   LOGS_DIR,
   TASK_ID_PATTERN

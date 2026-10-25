@@ -360,3 +360,73 @@ test('in-memory task output is capped while the log keeps everything', async () 
   assert.ok(result.total > 50000);
   assert.ok(result.logLength > result.total);
 });
+
+function runInProcess(mode, extraEnv = {}) {
+  const script = `
+    const { runAgyTask } = require(${JSON.stringify(path.join(ROOT, 'dispatcher.js'))});
+    runAgyTask({ role: 'web-engineer', prompt: 'x', workspace: process.argv[1], onDone: (t) => {
+      console.log(JSON.stringify({ status: t.status, error: t.error, output: t.output, usage: t.usage, conversationId: t.conversationId, changes: t.changes, log: require('fs').readFileSync(t.logFile, 'utf-8') }));
+    } });
+  `;
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'a2a-run-'));
+  const workspace = path.join(sandbox, 'ws');
+  fs.mkdirSync(workspace);
+  const logsDir = path.join(sandbox, 'logs');
+  const out = execFileSync(process.execPath, ['-e', script, workspace], {
+    encoding: 'utf-8',
+    env: { ...process.env, A2A_LOGS_DIR: logsDir, AGY_BIN: FAKE_AGENT, FAKE_AGY_MODE: mode, ...extraEnv }
+  });
+  return { result: JSON.parse(out.trim().split('\n').pop()), logsDir, workspace };
+}
+
+test('stream-json output becomes readable text, with usage and conversation id captured', () => {
+  const { result, logsDir } = runInProcess('stream');
+  assert.strictEqual(result.status, 'completed');
+  assert.strictEqual(result.output, 'Hello world' + 'plain passthrough line\n');
+  assert.strictEqual(result.conversationId, 'conv-12345678');
+  assert.strictEqual(result.usage.total_tokens, 120);
+  assert.match(result.log, /\[step\] run_command/);
+  assert.ok(!result.log.includes('"event"'));
+  const logged = fs.readFileSync(path.join(logsDir, 'usage.jsonl'), 'utf-8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.strictEqual(logged.length, 1);
+  assert.strictEqual(logged[0].usage.total_tokens, 120);
+  assert.strictEqual(logged[0].role, 'web-engineer');
+});
+
+test('an agent result whose status is not SUCCESS marks the task failed', () => {
+  const { result } = runInProcess('failed');
+  assert.strictEqual(result.status, 'failed');
+  assert.match(result.error, /ERROR/);
+});
+
+test('a git workspace reports what changed after the run', () => {
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'a2a-git-'));
+  const workspace = path.join(sandbox, 'ws');
+  fs.mkdirSync(workspace);
+  execFileSync('git', ['-C', workspace, 'init', '-q']);
+  fs.writeFileSync(path.join(workspace, 'new-file.txt'), 'hi');
+  const script = `
+    const { runAgyTask } = require(${JSON.stringify(path.join(ROOT, 'dispatcher.js'))});
+    runAgyTask({ role: 'web-engineer', prompt: 'x', workspace: process.argv[1], onDone: (t) => console.log(JSON.stringify({ changes: t.changes })) });
+  `;
+  const out = execFileSync(process.execPath, ['-e', script, workspace], {
+    encoding: 'utf-8',
+    env: { ...process.env, A2A_LOGS_DIR: path.join(sandbox, 'logs'), AGY_BIN: FAKE_AGENT, FAKE_AGY_MODE: 'stream' }
+  });
+  assert.match(JSON.parse(out.trim().split('\n').pop()).changes, /new-file\.txt/);
+});
+
+test('conversation_id and model reject values that could act as flags', () => {
+  const script = `
+    const { runAgyTask } = require(${JSON.stringify(path.join(ROOT, 'dispatcher.js'))});
+    for (const extra of [{ conversation_id: '--evil-flag-x' }, { model: '--evil' }]) {
+      try { runAgyTask({ role: 'web-engineer', prompt: 'x', workspace: process.argv[1], ...extra }); console.log('accepted'); } catch (e) { console.log(e.message); }
+    }
+  `;
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'a2a-val-'));
+  const out = execFileSync(process.execPath, ['-e', script, sandbox], {
+    encoding: 'utf-8',
+    env: { ...process.env, A2A_LOGS_DIR: path.join(sandbox, 'logs'), AGY_BIN: FAKE_AGENT }
+  });
+  assert.deepStrictEqual(out.trim().split('\n'), ['Invalid conversation_id', 'Invalid model name']);
+});

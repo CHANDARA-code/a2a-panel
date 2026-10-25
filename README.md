@@ -149,7 +149,16 @@ Set these environment variables for the server, the MCP server and the CLI. `0` 
 
 A stopped task shows `failed` with the reason (`Timed out after …` or `No output for …`).
 
-## 7. Tests
+## 7. Usage tracking and sessions
+
+Tasks run with `--output-format stream-json`. The bridge turns the event stream into readable text, and records the token usage `agy` reports.
+
+- `a2a usage` shows totals and a per-role breakdown, read from `logs/usage.jsonl`. The same data is at `GET /api/usage`.
+- Each synchronous MCP result ends with the task's token usage, its conversation id, and `git status` / `git diff --stat` of the workspace, so you can check the work without reading the agent's account.
+- Pass `conversation_id` (from an earlier result) to continue that Antigravity conversation instead of resending context. Pass `model` to pick a model from `agy models`.
+- A run whose final status from `agy` is not `SUCCESS` is marked failed.
+
+## 8. Tests
 
 ```bash
 cd ~/.a2a-antigravity

@@ -174,6 +174,8 @@ const server = http.createServer(async (req, res) => {
       const workspace = body.workspace;
       const mode = body.mode || 'accept-edits';
       const effort = body.effort || 'high';
+      const model = body.model;
+      const conversation_id = body.conversation_id;
       const isAsync = body.isAsync || body.async || false;
 
       if (!prompt) {
@@ -181,7 +183,7 @@ const server = http.createServer(async (req, res) => {
       }
 
       if (isAsync) {
-        const { taskId, taskRecord } = runAgyTask({ role, prompt, workspace, mode, effort });
+        const { taskId, taskRecord } = runAgyTask({ role, prompt, workspace, mode, effort, model, conversation_id });
         return sendJson(res, 202, {
           taskId,
           status: 'running',
@@ -198,9 +200,14 @@ const server = http.createServer(async (req, res) => {
           workspace,
           mode,
           effort,
+          model,
+          conversation_id,
           onDone: (taskRecord) => {
             sendJson(res, 200, {
               taskId: taskRecord.id,
+              usage: taskRecord.usage,
+              conversationId: taskRecord.conversationId,
+              changes: taskRecord.changes,
               status: taskRecord.status,
               skill: taskRecord.role,
               workspace: taskRecord.workspace,
@@ -257,6 +264,8 @@ const server = http.createServer(async (req, res) => {
         const workspace = params && params.workspace;
         const mode = (params && params.mode) || 'accept-edits';
         const effort = (params && params.effort) || 'high';
+        const model = params && params.model;
+        const conversation_id = params && params.conversation_id;
         const isAsync = (params && (params.isAsync || params.async)) || false;
 
         if (!prompt) {
@@ -268,7 +277,7 @@ const server = http.createServer(async (req, res) => {
         }
 
         if (isAsync) {
-          const { taskId, taskRecord } = runAgyTask({ role, prompt, workspace, mode, effort });
+          const { taskId, taskRecord } = runAgyTask({ role, prompt, workspace, mode, effort, model, conversation_id });
           return sendJson(res, 200, {
             jsonrpc: '2.0',
             id,
@@ -287,12 +296,17 @@ const server = http.createServer(async (req, res) => {
             workspace,
             mode,
             effort,
+            model,
+            conversation_id,
             onDone: (taskRecord) => {
               sendJson(res, 200, {
                 jsonrpc: '2.0',
                 id,
                 result: {
                   taskId: taskRecord.id,
+                  usage: taskRecord.usage,
+                  conversationId: taskRecord.conversationId,
+                  changes: taskRecord.changes,
                   status: taskRecord.status,
                   skill: taskRecord.role,
                   message: {

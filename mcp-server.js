@@ -20,6 +20,24 @@ function tailForLeader(taskRecord) {
   return `[output truncated to last ${LEADER_OUTPUT_LIMIT} of ${taskRecord.outputChars || out.length} chars; full log: ${taskRecord.logFile}]\n` + out.slice(-LEADER_OUTPUT_LIMIT);
 }
 
+function formatUsage(usage) {
+  if (!usage) return null;
+  const parts = [`${usage.total_tokens ?? 0} total`];
+  if (usage.input_tokens != null) parts.push(`${usage.input_tokens} in`);
+  if (usage.output_tokens != null) parts.push(`${usage.output_tokens} out`);
+  if (usage.cache_read_tokens) parts.push(`${usage.cache_read_tokens} cached`);
+  return `Antigravity tokens (not billed to Claude): ${parts.join(', ')}`;
+}
+
+function resultFooter(taskRecord) {
+  const lines = [];
+  const usage = formatUsage(taskRecord.usage);
+  if (usage) lines.push(usage);
+  if (taskRecord.conversationId) lines.push(`Conversation: ${taskRecord.conversationId} (pass as conversation_id to continue it)`);
+  if (taskRecord.changes) lines.push(`Workspace changes:\n${taskRecord.changes}`);
+  return lines.length ? '\n\n' + lines.join('\n') : '';
+}
+
 function workspaceError(workspace) {
   if (workspace && !require('fs').existsSync(workspace)) return 'Workspace does not exist: ' + workspace;
   return null;
@@ -62,6 +80,14 @@ const TOOLS = [
             'devops-engineer',
             'lead-software-engineer'
           ]
+        },
+        model: {
+          type: 'string',
+          description: 'Optional Antigravity model id (see `agy models`). Omit to use the default.'
+        },
+        conversation_id: {
+          type: 'string',
+          description: 'Continue an earlier Antigravity conversation (the id shown in a previous result) instead of starting fresh, so context is not resent.'
         },
         task_description: {
           type: 'string',
@@ -240,8 +266,12 @@ rl.on('line', async (line) => {
                 startedAt: task.startedAt,
                 finishedAt: task.finishedAt,
                 exitCode: task.exitCode,
+                error: task.error || undefined,
+                usage: task.usage || undefined,
+                conversationId: task.conversationId || undefined,
+                changes: task.changes || undefined,
                 outputPreview: task.output.slice(-2000),
-                totalLength: task.output.length
+                totalLength: task.outputChars || task.output.length
               }, null, 2)
             }
           ]
@@ -339,6 +369,8 @@ rl.on('line', async (line) => {
           workspace_path,
           mode = 'accept-edits',
           effort = 'high',
+          model,
+          conversation_id,
           acceptance_criteria,
           verification_command,
           is_async = false
@@ -368,6 +400,8 @@ rl.on('line', async (line) => {
             workspace: effectiveWorkspace,
             mode,
             effort,
+            model,
+            conversation_id,
             acceptance_criteria,
             verification_command
           });
@@ -390,6 +424,8 @@ rl.on('line', async (line) => {
             workspace: effectiveWorkspace,
             mode,
             effort,
+            model,
+            conversation_id,
             acceptance_criteria,
             verification_command,
             onDone: (taskRecord) => {
@@ -399,7 +435,7 @@ rl.on('line', async (line) => {
                 `Workspace: ${effectiveWorkspace}`,
                 `Duration: ${taskRecord.startedAt} -> ${taskRecord.finishedAt}`,
                 `==================================================\n`,
-                tailForLeader(taskRecord)
+                tailForLeader(taskRecord) + resultFooter(taskRecord)
               ].join('\n');
 
               sendRpcResponse(id, {

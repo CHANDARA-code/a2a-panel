@@ -4,7 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const http = require('http');
 const { spawn } = require('child_process');
-const { getAgentCard, runAgyTask, cancelTask, activeTasks } = require('./dispatcher');
+const { getAgentCard, runAgyTask, cancelTask, activeTasks, readUsageTotals } = require('./dispatcher');
 
 const PORT = parseInt(process.env.A2A_PORT || '5188', 10);
 const HOST = process.env.A2A_HOST || '127.0.0.1';
@@ -20,6 +20,7 @@ Usage:
   a2a list                             List all Antigravity expert dev personas & specialties
   a2a status                           Show A2A server health & agent status
   a2a tasks                            List all running & recent tasks (alias: a2a ps)
+  a2a usage                            Show Antigravity token usage totals (tokens kept off Claude's bill)
   a2a logs [taskId] [-f]               View or stream live logs of a task (or latest task)
   a2a dashboard [--no-open]            Open the web task panel (monitor, dispatch, cancel)
   a2a run <role> "<task prompt>"       Dispatch task to an Antigravity developer
@@ -311,6 +312,25 @@ async function handleTasks() {
   console.log(`Tip: Run "a2a logs <taskId> -f" to stream a task's real-time output.\n`);
 }
 
+function handleUsage() {
+  const totals = readUsageTotals();
+  const fmt = (n) => n.toLocaleString('en-US');
+  console.log(`\nAntigravity usage across ${fmt(totals.tasks)} task(s)`);
+  console.log(`  total     ${fmt(totals.total_tokens)}`);
+  console.log(`  input     ${fmt(totals.input_tokens)}`);
+  console.log(`  output    ${fmt(totals.output_tokens)}`);
+  console.log(`  thinking  ${fmt(totals.thinking_tokens)}`);
+  console.log(`  cached    ${fmt(totals.cache_read_tokens)}`);
+  const roles = Object.entries(totals.byRole).sort((a, b) => b[1].total_tokens - a[1].total_tokens);
+  if (roles.length) {
+    console.log('\nBy role');
+    for (const [role, info] of roles) {
+      console.log(`  ${role.padEnd(26)} ${String(info.tasks).padStart(4)} task(s)  ${fmt(info.total_tokens)} tokens`);
+    }
+  }
+  console.log('\nThese tokens ran on Antigravity, not in your Claude context. Claude only paid for the short result it read back.\n');
+}
+
 async function handleLogs(args) {
   const logsDir = path.join(__dirname, 'logs');
   let follow = false;
@@ -390,6 +410,11 @@ async function main() {
 
   if (cmd === 'tasks' || cmd === 'ps') {
     await handleTasks();
+    return;
+  }
+
+  if (cmd === 'usage') {
+    handleUsage();
     return;
   }
 
