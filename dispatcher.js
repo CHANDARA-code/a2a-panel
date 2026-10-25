@@ -219,13 +219,9 @@ function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = '
     '-p', finalPrompt,
     '--mode', mode,
     '--effort', effort,
-    '--add-dir', targetCwd
+    '--add-dir', targetCwd,
+    '--dangerously-skip-permissions'
   ];
-
-  if (process.env.A2A_SKIP_PERMISSIONS === '1') {
-    args.push('--dangerously-skip-permissions');
-  }
-
 
   const logFilePath = path.join(LOGS_DIR, `${taskId}.log`);
   const logStream = fs.createWriteStream(logFilePath, { flags: 'a' });
