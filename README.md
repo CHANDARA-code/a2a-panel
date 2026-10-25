@@ -178,6 +178,7 @@ Set these environment variables for the server, the MCP server and the CLI. `0` 
 | `A2A_MAX_CONCURRENT` | `4` | Refuses a new task while this many agents are running, across the server, MCP server and CLI. |
 | `A2A_MAX_OUTPUT_CHARS` | `200000` | Output kept in memory per task. The log file under `logs/` keeps everything. |
 | `A2A_KILL_ESCALATION_MS` | `5000` | Time between SIGTERM and SIGKILL when stopping a task. |
+| `A2A_VERIFY_TIMEOUT_MS` | `600000` (10 min) | Limit for the bridge's own run of a `verification_command`. |
 | `A2A_LOG_RETENTION_DAYS` | `14` | Task logs older than this are deleted when a new task starts. |
 
 A stopped task shows `failed` with the reason (`Timed out after …` or `No output for …`).
@@ -191,7 +192,19 @@ Tasks run with `--output-format stream-json`. The bridge turns the event stream 
 - Pass `conversation_id` (from an earlier result) to continue that Antigravity conversation instead of resending context. Pass `model` to pick a model from `agy models`.
 - A run whose final status from `agy` is not `SUCCESS` is marked failed.
 
-## 8. Tests
+## 8. Verification gate
+
+If a task has a `verification_command` (MCP tool, `/tasks/send`, or JSON-RPC `message/send`), the agent is told to run it, and then **the bridge runs it again itself** in the workspace once the agent has finished successfully.
+
+- Exit code 0: the task stays `completed`.
+- Non-zero exit or a timeout (`A2A_VERIFY_TIMEOUT_MS`, default 10 minutes): the task is marked `failed`, and the result includes the command's output tail.
+- The result and the log record the outcome as "run by the bridge (not the agent)". `a2a_validate_delivery` uses the same gate.
+- If the agent itself failed, the command is not run.
+- The command runs through `sh -c` with your user's permissions, like the agent does. It can't be cancelled while it runs; the timeout is the limit.
+
+A passing command only proves what that command checks. If the agent also wrote the tests, a green run says little, so review the diff too.
+
+## 9. Tests
 
 ```bash
 node --test test/server.test.js

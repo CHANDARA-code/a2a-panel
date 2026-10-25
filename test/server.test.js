@@ -1,6 +1,7 @@
 const { test, before, after } = require('node:test');
 const assert = require('node:assert');
 const http = require('node:http');
+const net = require('node:net');
 const { spawn, execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -43,8 +44,19 @@ function descendantsMatching(rootPid, pattern) {
     .map((m) => Number(m[1]));
 }
 
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.on('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const { port } = probe.address();
+      probe.close(() => resolve(port));
+    });
+  });
+}
+
 async function startInstance(extraEnv = {}) {
-  const port = 5200 + Math.floor(Math.random() * 700);
+  const port = await freePort();
   const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'a2a-test-'));
   const logsDir = path.join(sandbox, 'logs');
   const tokenFile = path.join(sandbox, 'token');
@@ -361,18 +373,18 @@ test('in-memory task output is capped while the log keeps everything', async () 
   assert.ok(result.logLength > result.total);
 });
 
-function runInProcess(mode, extraEnv = {}) {
+function runInProcess(mode, extraEnv = {}, taskArgs = {}) {
   const script = `
     const { runAgyTask } = require(${JSON.stringify(path.join(ROOT, 'dispatcher.js'))});
-    runAgyTask({ role: 'web-engineer', prompt: 'x', workspace: process.argv[1], onDone: (t) => {
-      console.log(JSON.stringify({ status: t.status, error: t.error, output: t.output, usage: t.usage, conversationId: t.conversationId, changes: t.changes, log: require('fs').readFileSync(t.logFile, 'utf-8') }));
-    } });
+    runAgyTask({ role: 'web-engineer', prompt: 'x', workspace: process.argv[1], ...JSON.parse(process.argv[2] || '{}'), onDone: (t) => setTimeout(() => {
+      console.log(JSON.stringify({ status: t.status, error: t.error, verification: t.verification, output: t.output, usage: t.usage, conversationId: t.conversationId, changes: t.changes, log: require('fs').readFileSync(t.logFile, 'utf-8') }));
+    }, 300) });
   `;
   const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'a2a-run-'));
   const workspace = path.join(sandbox, 'ws');
   fs.mkdirSync(workspace);
   const logsDir = path.join(sandbox, 'logs');
-  const out = execFileSync(process.execPath, ['-e', script, workspace], {
+  const out = execFileSync(process.execPath, ['-e', script, workspace, JSON.stringify(taskArgs)], {
     encoding: 'utf-8',
     env: { ...process.env, A2A_LOGS_DIR: logsDir, AGY_BIN: FAKE_AGENT, FAKE_AGY_MODE: mode, ...extraEnv }
   });
@@ -497,4 +509,36 @@ test('logs older than the retention window are pruned, recent ones kept', () => 
   });
   assert.ok(!fs.existsSync(old));
   assert.ok(fs.existsSync(recent));
+});
+
+test('the bridge runs the verification command itself and a pass keeps the task completed', () => {
+  const { result, workspace } = runInProcess('stream', {}, { verification_command: 'pwd > ran-here.txt && exit 0' });
+  assert.strictEqual(result.status, 'completed');
+  assert.strictEqual(result.verification.passed, true);
+  assert.strictEqual(result.verification.exitCode, 0);
+  assert.strictEqual(fs.readFileSync(path.join(workspace, 'ran-here.txt'), 'utf-8').trim(), fs.realpathSync(workspace));
+  assert.match(result.log, /VERIFICATION PASSED/);
+  assert.ok(result.log.indexOf('VERIFICATION PASSED') < result.log.indexOf('TASK FINISHED'));
+});
+
+test('a failing verification command marks an otherwise successful task failed and keeps the output', () => {
+  const { result } = runInProcess('stream', {}, { verification_command: 'echo boom-output; exit 3' });
+  assert.strictEqual(result.status, 'failed');
+  assert.strictEqual(result.verification.passed, false);
+  assert.strictEqual(result.verification.exitCode, 3);
+  assert.match(result.verification.outputTail, /boom-output/);
+  assert.match(result.error, /Verification failed \(exit 3\)/);
+});
+
+test('a hung verification command is killed at the verify timeout', () => {
+  const { result } = runInProcess('stream', { A2A_VERIFY_TIMEOUT_MS: '300', A2A_KILL_ESCALATION_MS: '200' }, { verification_command: 'sleep 30' });
+  assert.strictEqual(result.status, 'failed');
+  assert.strictEqual(result.verification.timedOut, true);
+  assert.match(result.error, /Verification timed out/);
+});
+
+test('verification is skipped when the agent itself failed', () => {
+  const { result } = runInProcess('failed', {}, { verification_command: 'exit 0' });
+  assert.strictEqual(result.status, 'failed');
+  assert.strictEqual(result.verification, null);
 });

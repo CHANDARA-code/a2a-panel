@@ -260,6 +260,51 @@ const USAGE_LOG = path.join(LOGS_DIR, 'usage.jsonl');
 const CONVERSATION_ID_PATTERN = /^[A-Za-z0-9][\w-]{7,63}$/;
 const MODEL_PATTERN = /^[A-Za-z0-9][\w.:-]{0,63}$/;
 const CHANGES_LIMIT = 2000;
+const VERIFY_OUTPUT_LIMIT = 4000;
+
+function runVerification(command, cwd, logStream) {
+  const timeoutMs = envInt('A2A_VERIFY_TIMEOUT_MS', 600000);
+  const startedAt = Date.now();
+  logStream.write(`\n=== VERIFICATION (run by agy-bridge, not the agent): ${command} ===\n`);
+  return new Promise((resolve) => {
+    let tail = '';
+    let timedOut = false;
+    let settled = false;
+    const child = spawn('sh', ['-c', command], { cwd, env: { ...process.env }, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+    const onData = (data) => {
+      const text = data.toString('utf-8');
+      logStream.write(text);
+      tail = (tail + text).slice(-VERIFY_OUTPUT_LIMIT);
+    };
+    const killTimers = [];
+    const settle = (exitCode, extra = '') => {
+      if (settled) return;
+      settled = true;
+      killTimers.forEach(clearTimeout);
+      if (extra) tail = (tail + extra).slice(-VERIFY_OUTPUT_LIMIT);
+      const passed = exitCode === 0 && !timedOut;
+      logStream.write(`\n=== VERIFICATION ${passed ? 'PASSED' : 'FAILED'} (exit ${exitCode}${timedOut ? ', timed out' : ''}) ===\n`);
+      resolve({ command, exitCode, passed, timedOut, durationMs: Date.now() - startedAt, outputTail: tail });
+    };
+    child.stdout.on('data', onData);
+    child.stderr.on('data', onData);
+    child.on('error', (err) => settle(-1, `\n${err.message}`));
+    child.on('close', (code) => settle(code === null ? -1 : code));
+    if (timeoutMs > 0) {
+      killTimers.push(setTimeout(() => {
+        timedOut = true;
+        try {
+          signalTaskTree(child.pid, 'SIGTERM');
+        } catch (err) {}
+        killTimers.push(setTimeout(() => {
+          try {
+            signalTaskTree(child.pid, 'SIGKILL');
+          } catch (err) {}
+        }, KILL_ESCALATION_MS));
+      }, timeoutMs));
+    }
+  });
+}
 
 function workspaceChanges(cwd) {
   const run = (args) => {
@@ -401,6 +446,7 @@ function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = '
     model: model || null,
     conversationId: conversation_id || null,
     usage: null,
+    verification: null,
     changes: '',
     error: null,
     process: null
@@ -549,15 +595,36 @@ function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = '
         logStream.write('\n[A2A] Marked failed: the agent output says it had no file or shell tools.\n');
       }
     }
-    taskRecord.finishedAt = new Date().toISOString();
-    taskRecord.exitCode = code;
-    taskRecord.process = null;
-    taskRecord.changes = workspaceChanges(targetCwd);
-    recordUsage(taskRecord);
+    const finalize = () => {
+      taskRecord.finishedAt = new Date().toISOString();
+      taskRecord.exitCode = code;
+      taskRecord.process = null;
+      taskRecord.changes = workspaceChanges(targetCwd);
+      recordUsage(taskRecord);
+      removeProcessFiles();
+      logStream.write(`\n\n=== TASK FINISHED: Exit code ${code} (${taskRecord.status}) ===\n`);
+      logStream.end();
+      if (onDone) onDone(taskRecord);
+    };
+
+    if (!verification_command || taskRecord.status !== 'completed') {
+      finalize();
+      return;
+    }
     removeProcessFiles();
-    logStream.write(`\n\n=== TASK FINISHED: Exit code ${code} (${taskRecord.status}) ===\n`);
-    logStream.end();
-    if (onDone) onDone(taskRecord);
+    taskRecord.status = 'running';
+    runVerification(verification_command, targetCwd, logStream).then((verification) => {
+      taskRecord.verification = verification;
+      taskRecord.status = 'completed';
+      if (!verification.passed) {
+        taskRecord.status = 'failed';
+        taskRecord.error = verification.timedOut
+          ? `Verification timed out: ${verification_command}`
+          : `Verification failed (exit ${verification.exitCode}): ${verification_command}`;
+        logStream.write(`\n[A2A] Marked failed: ${taskRecord.error}\n`);
+      }
+      finalize();
+    });
   });
 
   return {

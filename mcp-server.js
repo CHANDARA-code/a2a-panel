@@ -31,6 +31,12 @@ function formatUsage(usage) {
 
 function resultFooter(taskRecord) {
   const lines = [];
+  const verification = taskRecord.verification;
+  if (verification) {
+    const seconds = Math.round(verification.durationMs / 1000);
+    lines.push(`Verification run by the bridge (not the agent): ${verification.passed ? 'PASSED' : 'FAILED'}, exit ${verification.exitCode}${verification.timedOut ? ' (timed out)' : ''}, ${seconds}s\n  command: ${verification.command}`);
+    if (!verification.passed) lines.push(`  output tail:\n${verification.outputTail.slice(-1500)}`);
+  }
   const usage = formatUsage(taskRecord.usage);
   if (usage) lines.push(usage);
   if (taskRecord.conversationId) lines.push(`Conversation: ${taskRecord.conversationId} (pass as conversation_id to continue it)`);
@@ -113,7 +119,7 @@ const TOOLS = [
         },
         verification_command: {
           type: 'string',
-          description: 'Automated test or build command (e.g., "npm test", "flutter test", "pytest") the developer must run to validate the code.'
+          description: 'Test or build command (e.g., "npm test", "pytest"). The developer runs it, and the bridge runs it again itself after the task; a failing exit code marks the task failed.'
         },
         is_async: {
           type: 'boolean',
@@ -268,6 +274,7 @@ rl.on('line', async (line) => {
                 exitCode: task.exitCode,
                 error: task.error || undefined,
                 usage: task.usage || undefined,
+                verification: task.verification || undefined,
                 conversationId: task.conversationId || undefined,
                 changes: task.changes || undefined,
                 outputPreview: task.output.slice(-2000),
@@ -341,11 +348,12 @@ rl.on('line', async (line) => {
             workspace: effectiveWorkspace,
             mode: 'accept-edits',
             effort: 'high',
+            verification_command,
             onDone: (taskRecord) => {
               sendRpcResponse(id, {
                 content: [{
                   type: 'text',
-                  text: `=== [A2A TASK VALIDATION REPORT] ===\nStatus: ${taskRecord.status.toUpperCase()}\n\n${taskRecord.output}`
+                  text: `=== [A2A TASK VALIDATION REPORT] ===\nStatus: ${taskRecord.status.toUpperCase()}\n\n${taskRecord.output}${resultFooter(taskRecord)}`
                 }],
                 isError: taskRecord.status !== 'completed'
               });
