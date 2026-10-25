@@ -1,0 +1,24 @@
+# Contributing
+
+## Setup
+
+```bash
+git clone <repo-url> agy-bridge
+cd agy-bridge
+npm test
+npm run build:panel
+```
+
+The bridge has no runtime dependencies. Only the web panel (`panel/`) has its own `package.json`.
+
+## Tests
+
+`npm test` runs `test/server.test.js` against a fake agent (`test/fake-agy.sh`), so it needs neither `agy` nor a Google account. Add a fake mode to `test/fake-agy.sh` when you need the agent to behave in a new way.
+
+A test should be able to fail: check that it fails against the code it covers before you rely on it.
+
+## Pull requests
+
+- Keep a change to one concern and describe what it fixes or adds.
+- Include or update tests for behaviour changes.
+- Run `npm test` and, for panel changes, `npm --prefix panel run build`.

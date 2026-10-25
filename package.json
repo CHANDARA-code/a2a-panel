@@ -1,0 +1,37 @@
+{
+  "name": "agy-bridge",
+  "version": "0.1.0",
+  "description": "Delegate coding work from Claude Code to a team of Google Antigravity (agy) specialists, with a web panel, token usage tracking and safe process control.",
+  "license": "MIT",
+  "bin": {
+    "agy-bridge": "cli.js",
+    "a2a": "cli.js"
+  },
+  "main": "dispatcher.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test test/server.test.js",
+    "build:panel": "npm --prefix panel install && npm --prefix panel run build",
+    "prepack": "npm run build:panel"
+  },
+  "files": [
+    "*.js",
+    "agent-card.json",
+    "agent.json",
+    "personas",
+    "panel/dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "keywords": [
+    "claude-code",
+    "antigravity",
+    "agy",
+    "mcp",
+    "a2a",
+    "agent",
+    "delegation"
+  ]
+}

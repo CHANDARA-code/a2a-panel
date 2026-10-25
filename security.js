@@ -1,8 +1,9 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const { DATA_DIR } = require('./config');
 
-const TOKEN_FILE = process.env.A2A_TOKEN_FILE || path.join(__dirname, 'token');
+const TOKEN_FILE = process.env.A2A_TOKEN_FILE || path.join(DATA_DIR, 'token');
 const TOKEN_MIN_LENGTH = 32;
 
 function loadOrCreateToken() {

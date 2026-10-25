@@ -3,12 +3,27 @@ const path = require('path');
 const fs = require('fs');
 const { createStreamParser } = require('./agy-stream');
 
-const AGY_BIN = process.env.AGY_BIN || '/Users/chandara-dgc/.local/bin/agy';
+const { DATA_DIR } = require('./config');
+
+function resolveAgyBin() {
+  if (process.env.AGY_BIN) return process.env.AGY_BIN;
+  const candidates = (process.env.PATH || '').split(path.delimiter).filter(Boolean).map((dir) => path.join(dir, 'agy'));
+  candidates.push(path.join(process.env.HOME || '', '.local', 'bin', 'agy'));
+  for (const candidate of candidates) {
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      return candidate;
+    } catch (err) {}
+  }
+  return 'agy';
+}
+
+const AGY_BIN = resolveAgyBin();
 const AGENT_CARD_PATH = fs.existsSync(path.join(__dirname, 'agent-card.json'))
   ? path.join(__dirname, 'agent-card.json')
   : path.join(__dirname, 'agent.json');
 
-const LOGS_DIR = process.env.A2A_LOGS_DIR || path.join(__dirname, 'logs');
+const LOGS_DIR = process.env.A2A_LOGS_DIR || path.join(DATA_DIR, 'logs');
 if (!fs.existsSync(LOGS_DIR)) {
   fs.mkdirSync(LOGS_DIR, { recursive: true });
 }
@@ -193,23 +208,28 @@ function countRunningTasks() {
 
 const NO_WORK_SIGNALS = /no output produced|do not have access to (?:command|file|direct)|does not provide direct file|no file[- ]write or terminal|not provisioned/i;
 
-const PLUGINS_DIR = path.join(process.env.HOME || '', '.gemini', 'config', 'plugins');
+const PLUGINS_DIR = process.env.A2A_PLUGINS_DIR || path.join(process.env.HOME || '', '.gemini', 'config', 'plugins');
+const PERSONAS_DIR = path.join(__dirname, 'personas');
 const PERSONA_LIMIT = 6000;
+
+function readPersona(file) {
+  try {
+    if (!fs.existsSync(file)) return null;
+    return fs.readFileSync(file, 'utf-8').replace(/^---[\s\S]*?---\s*/, '').trim().slice(0, PERSONA_LIMIT);
+  } catch (err) {
+    return null;
+  }
+}
 
 function loadRolePersona(role) {
   if (!role || !/^[\w-]+$/.test(role)) return null;
   try {
     for (const plugin of fs.readdirSync(PLUGINS_DIR)) {
-      const file = path.join(PLUGINS_DIR, plugin, 'agents', `${role}.md`);
-      if (fs.existsSync(file)) {
-        const body = fs.readFileSync(file, 'utf-8').replace(/^---[\s\S]*?---\s*/, '').trim();
-        return body.slice(0, PERSONA_LIMIT);
-      }
+      const persona = readPersona(path.join(PLUGINS_DIR, plugin, 'agents', `${role}.md`));
+      if (persona) return persona;
     }
-  } catch (err) {
-    return null;
-  }
-  return null;
+  } catch (err) {}
+  return readPersona(path.join(PERSONAS_DIR, `${role}.md`));
 }
 
 const USAGE_LOG = path.join(LOGS_DIR, 'usage.jsonl');

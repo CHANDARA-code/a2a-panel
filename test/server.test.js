@@ -430,3 +430,25 @@ test('conversation_id and model reject values that could act as flags', () => {
   });
   assert.deepStrictEqual(out.trim().split('\n'), ['Invalid conversation_id', 'Invalid model name']);
 });
+
+test('shipped personas are used when no plugin persona exists', () => {
+  const { result } = runInProcess('stream', { A2A_PLUGINS_DIR: '/nonexistent-plugins-dir' });
+  assert.match(result.log, /### YOUR ROLE \(web-engineer\)/);
+  assert.match(result.log, /Web engineer/);
+});
+
+test('every role in the agent card has a shipped persona except the general lead', () => {
+  const card = JSON.parse(fs.readFileSync(path.join(ROOT, 'agent-card.json'), 'utf-8'));
+  for (const skill of card.skills) {
+    if (skill.id === 'lead-software-engineer') continue;
+    const name = skill.agy_agent || skill.id;
+    assert.ok(fs.existsSync(path.join(ROOT, 'personas', `${name}.md`)), `missing persona for ${name}`);
+  }
+});
+
+test('doctor and init --dry-run run without touching Claude Code', () => {
+  const dry = execFileSync(process.execPath, [path.join(ROOT, 'cli.js'), 'init', '--dry-run'], { encoding: 'utf-8' });
+  assert.match(dry, /claude mcp add --scope user agy-bridge/);
+  const version = execFileSync(process.execPath, [path.join(ROOT, 'cli.js'), 'version'], { encoding: 'utf-8' });
+  assert.match(version.trim(), /^\d+\.\d+\.\d+$/);
+});

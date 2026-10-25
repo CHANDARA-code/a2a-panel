@@ -87,7 +87,7 @@
       "id": "devops-engineer",
       "name": "DevOps & Release Engineer",
       "description": "Owns deployment and operations: CI/CD pipelines, build and release automation, environment configuration, versioning, rollout and rollback plans, and monitoring setup. Flags irreversible steps before executing them.",
-      "agy_agent": "release-manager"
+      "agy_agent": "devops-engineer"
     },
     {
       "id": "lead-software-engineer",

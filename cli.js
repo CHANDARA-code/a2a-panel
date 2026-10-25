@@ -4,33 +4,38 @@ const path = require('path');
 const fs = require('fs');
 const http = require('http');
 const { spawn } = require('child_process');
+const { DATA_DIR } = require('./config');
 const { getAgentCard, runAgyTask, cancelTask, activeTasks, readUsageTotals } = require('./dispatcher');
 
 const PORT = parseInt(process.env.A2A_PORT || '5188', 10);
 const HOST = process.env.A2A_HOST || '127.0.0.1';
-const PID_FILE = path.join(__dirname, 'server.pid');
+const PID_FILE = path.join(DATA_DIR, 'server.pid');
+const OPEN_COMMAND = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open';
+const LAUNCH_AGENT_PLIST = process.platform === 'darwin' ? path.join(process.env.HOME || '', 'Library/LaunchAgents/com.antigravity.a2a-server.plist') : null;
 
 function showHelp() {
   console.log(`
 ========================================================================
-  A2A PROTOCOL CLI: Claude Code (Team Leader) <-> Antigravity (Senior Devs)
+  AGY-BRIDGE: Claude Code (Team Leader) <-> Antigravity (Senior Devs)
 ========================================================================
 
 Usage:
-  a2a list                             List all Antigravity expert dev personas & specialties
-  a2a status                           Show A2A server health & agent status
-  a2a tasks                            List all running & recent tasks (alias: a2a ps)
-  a2a usage                            Show Antigravity token usage totals (tokens kept off Claude's bill)
-  a2a logs [taskId] [-f]               View or stream live logs of a task (or latest task)
-  a2a dashboard [--no-open]            Open the web task panel (monitor, dispatch, cancel)
-  a2a run <role> "<task prompt>"       Dispatch task to an Antigravity developer
-  a2a server start                     Start A2A protocol HTTP & JSON-RPC daemon in background
-  a2a server stop                      Stop background A2A daemon
-  a2a server restart                   Restart A2A daemon
-  a2a server run                       Run A2A server in foreground
-  a2a mcp                              Run A2A MCP server for Claude Code (stdio)
+  agy-bridge list                      List all Antigravity expert dev personas & specialties
+  agy-bridge status                    Show A2A server health & agent status
+  agy-bridge tasks                     List all running & recent tasks (alias: ps)
+  agy-bridge doctor                    Check Node, agy, sign-in, git, data folder and Claude Code setup
+  agy-bridge init [--dry-run]          Register this bridge as an MCP server in Claude Code
+  agy-bridge usage                     Show Antigravity token usage totals (tokens kept off Claude's bill)
+  agy-bridge logs [taskId] [-f]        View or stream live logs of a task (or latest task)
+  agy-bridge dashboard [--no-open]     Open the web task panel (monitor, dispatch, cancel)
+  agy-bridge run <role> "<task prompt>"  Dispatch task to an Antigravity developer
+  agy-bridge server start              Start A2A protocol HTTP & JSON-RPC daemon in background
+  agy-bridge server stop               Stop background A2A daemon
+  agy-bridge server restart            Restart A2A daemon
+  agy-bridge server run                Run A2A server in foreground
+  agy-bridge mcp                       Run A2A MCP server for Claude Code (stdio)
 
-Options for "a2a run":
+Options for "agy-bridge run":
   --workspace <path>   Target workspace (defaults to current directory)
   --mode <mode>        Execution mode: accept-edits (default), plan
   --effort <effort>    Reasoning effort: low, medium, high (default), xhigh, max
@@ -94,7 +99,7 @@ async function handleStatus() {
 }
 
 async function handleServer(subcmd) {
-  const plistPath = path.join(process.env.HOME, 'Library/LaunchAgents/com.antigravity.a2a-server.plist');
+  const plistPath = LAUNCH_AGENT_PLIST && fs.existsSync(LAUNCH_AGENT_PLIST) ? LAUNCH_AGENT_PLIST : null;
 
   if (subcmd === 'run') {
     require('./server').startServer();
@@ -102,7 +107,7 @@ async function handleServer(subcmd) {
   }
 
   if (subcmd === 'start') {
-    if (fs.existsSync(plistPath)) {
+    if (plistPath) {
       spawn('launchctl', ['load', plistPath]);
       console.log(`\x1b[32m[✓] A2A LaunchAgent service started via launchctl\x1b[0m`);
       console.log(`    Listening on: http://${HOST}:${PORT}`);
@@ -115,8 +120,8 @@ async function handleServer(subcmd) {
       return;
     }
 
-    const outLog = fs.openSync(path.join(__dirname, 'server.log'), 'a');
-    const errLog = fs.openSync(path.join(__dirname, 'server.err'), 'a');
+    const outLog = fs.openSync(path.join(DATA_DIR, 'server.log'), 'a');
+    const errLog = fs.openSync(path.join(DATA_DIR, 'server.err'), 'a');
 
     const child = spawn(process.execPath, [path.join(__dirname, 'server.js')], {
       detached: true,
@@ -130,7 +135,7 @@ async function handleServer(subcmd) {
   }
 
   if (subcmd === 'stop') {
-    if (fs.existsSync(plistPath)) {
+    if (plistPath) {
       spawn('launchctl', ['unload', plistPath]);
       console.log(`\x1b[32m[✓] Stopped A2A LaunchAgent service via launchctl\x1b[0m`);
       return;
@@ -151,7 +156,7 @@ async function handleServer(subcmd) {
   }
 
   if (subcmd === 'restart') {
-    if (fs.existsSync(plistPath)) {
+    if (plistPath) {
       spawn('launchctl', ['unload', plistPath]);
       setTimeout(() => {
         spawn('launchctl', ['load', plistPath]);
@@ -159,15 +164,19 @@ async function handleServer(subcmd) {
       }, 500);
       return;
     }
+    await handleServer('stop');
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await handleServer('start');
+    return;
   }
 
-  console.log('Unknown server command. Use "a2a server [start|stop|restart|run]"');
+  console.log('Unknown server command. Use "agy-bridge server [start|stop|restart|run]"');
 }
 
 async function handleRun(args) {
   if (args.length < 2) {
-    console.error('Error: "a2a run" requires <role> and "<prompt>"');
-    console.error('Example: a2a run web-engineer "Create a responsive login form"');
+    console.error('Error: "agy-bridge run" requires <role> and "<prompt>"');
+    console.error('Example: agy-bridge run web-engineer "Create a responsive login form"');
     process.exit(1);
   }
 
@@ -201,12 +210,12 @@ async function handleRun(args) {
   }
 
   if (!role) {
-    console.error('Error: "a2a run" requires a <role>');
+    console.error('Error: "agy-bridge run" requires a <role>');
     process.exit(1);
   }
 
   if (!prompt || !prompt.trim()) {
-    console.error('Error: "a2a run" requires a non-empty "<prompt>" (flags may appear before or after it)');
+    console.error('Error: "agy-bridge run" requires a non-empty "<prompt>" (flags may appear before or after it)');
     process.exit(1);
   }
 
@@ -253,7 +262,7 @@ async function handleRun(args) {
 }
 
 async function handleTasks() {
-  const logsDir = path.join(__dirname, 'logs');
+  const logsDir = path.join(DATA_DIR, 'logs');
   const s = await checkServerOnline();
 
   let tasks = [];
@@ -332,7 +341,7 @@ function handleUsage() {
 }
 
 async function handleLogs(args) {
-  const logsDir = path.join(__dirname, 'logs');
+  const logsDir = path.join(DATA_DIR, 'logs');
   let follow = false;
   let targetId = null;
 
@@ -367,7 +376,7 @@ async function handleLogs(args) {
       }
     }
     if (!logPath) {
-      logPath = path.join(__dirname, 'server.log');
+      logPath = path.join(DATA_DIR, 'server.log');
       console.log(`\x1b[90m[Showing A2A server log]\x1b[0m\n`);
     }
   }
@@ -413,6 +422,21 @@ async function main() {
     return;
   }
 
+  if (cmd === 'doctor') {
+    const { runDoctor, printDoctor } = require('./setup');
+    process.exit(printDoctor(runDoctor()) ? 0 : 1);
+  }
+
+  if (cmd === 'init') {
+    const { runInit } = require('./setup');
+    process.exit(runInit({ dryRun: args.includes('--dry-run') }) ? 0 : 1);
+  }
+
+  if (cmd === 'version' || cmd === '--version' || cmd === '-v') {
+    console.log(require('./package.json').version);
+    return;
+  }
+
   if (cmd === 'usage') {
     handleUsage();
     return;
@@ -426,7 +450,7 @@ async function main() {
   if (cmd === 'dashboard') {
     const panelUrl = `http://${HOST}:${PORT}/dashboard`;
     console.log(panelUrl);
-    if (!args.includes('--no-open')) spawn('open', [panelUrl], { stdio: 'ignore', detached: true }).unref();
+    if (!args.includes('--no-open')) spawn(OPEN_COMMAND, [panelUrl], { stdio: 'ignore', detached: true }).unref();
     return;
   }
 
@@ -445,7 +469,7 @@ async function main() {
     return;
   }
 
-  console.error(`Unknown command: "${cmd}". Run "a2a help" for usage.`);
+  console.error(`Unknown command: "${cmd}". Run "agy-bridge help" for usage.`);
   process.exit(1);
 }
 

@@ -174,7 +174,7 @@
       "examples": ["Add a GitHub Actions pipeline that tests, builds and publishes a tagged release", "Write a rollout and rollback plan for the next production deploy"],
       "inputModes": ["application/json", "text/plain"],
       "outputModes": ["application/json", "text/plain"],
-      "agy_agent": "release-manager"
+      "agy_agent": "devops-engineer"
     },
     {
       "id": "lead-software-engineer",
