@@ -1,0 +1,88 @@
+{
+  "schema_version": "1.0.0",
+  "name": "antigravity-senior-dev-team",
+  "display_name": "Antigravity Senior Expert Software Developer Team",
+  "description": "Autonomous multi-agent squad of senior software developers powered by Google Antigravity. Specialized in fullstack web development, REST/GraphQL APIs, mobile/Flutter development, desktop systems, automated testing, bug diagnosis, security audits, and staff-level code reviews.",
+  "version": "1.0.0",
+  "url": "http://127.0.0.1:5188",
+  "provider": {
+    "name": "Google Antigravity",
+    "url": "https://antigravity.google"
+  },
+  "capabilities": {
+    "streaming": true,
+    "async_tasks": true,
+    "stateful_sessions": true,
+    "autonomous_execution": true,
+    "tool_use": [
+      "read_file",
+      "edit_file",
+      "write_file",
+      "run_command",
+      "search_web"
+    ]
+  },
+  "roles": [
+    {
+      "id": "web-engineer",
+      "name": "Senior Web Engineer",
+      "description": "Fullstack web implementer. Handles React, Next.js, Vue, Angular, SSR/SSG/CSR architectures, frontend UI/UX, responsive layouts, Tailwind/CSS, and web backend integrations.",
+      "agy_agent": "web-engineer"
+    },
+    {
+      "id": "api-engineer",
+      "name": "Senior API & Backend Engineer",
+      "description": "Designs and implements robust REST, GraphQL, and gRPC APIs, database schemas, ORM models, auth middleware, serialization, and contract-driven backend services.",
+      "agy_agent": "api-engineer"
+    },
+    {
+      "id": "mobile-engineer",
+      "name": "Senior Mobile Engineer",
+      "description": "Specialized in Flutter, Dart, React Native, iOS (Swift/SwiftUI), and Android (Kotlin). Builds responsive mobile layouts, platform channels, state management, and offline-first mobile apps.",
+      "agy_agent": "mobile-engineer"
+    },
+    {
+      "id": "desktop-engineer",
+      "name": "Senior Desktop Engineer",
+      "description": "Builds Electron, Tauri, and native macOS desktop applications with background daemon management, IPC bridges, and OS-level packaging.",
+      "agy_agent": "desktop-engineer"
+    },
+    {
+      "id": "test-engineer",
+      "name": "Senior QA & Test Automation Engineer",
+      "description": "Designs and writes comprehensive test suites (unit, component, widget, integration, E2E), mock generators, regression suites, and verifies test coverage.",
+      "agy_agent": "test-engineer"
+    },
+    {
+      "id": "bug-triager",
+      "name": "Senior Bug Triager & Diagnostician",
+      "description": "Root-cause-first specialist. Reproduces failures, analyzes stack traces and runtime logs, isolates edge cases, and provides verifiable diagnoses before patching.",
+      "agy_agent": "bug-triager"
+    },
+    {
+      "id": "security-auditor",
+      "name": "Senior Security Auditor",
+      "description": "Conducts code security audits, OWASP Top 10 mitigation, auth flow hardening, input validation, secret leaks prevention, and least-privilege checks.",
+      "agy_agent": "security-auditor"
+    },
+    {
+      "id": "code-reviewer",
+      "name": "Senior Staff Code Reviewer",
+      "description": "Multi-axis code reviewer. Inspects correctness, edge cases, concurrency, algorithmic complexity, maintainability, and clean architecture before merging.",
+      "agy_agent": "code-reviewer"
+    },
+    {
+      "id": "web-performance-auditor",
+      "name": "Senior Web Performance Engineer",
+      "description": "Profiles and optimizes Core Web Vitals (LCP, INP, CLS), bundle sizes, hydration overhead, database query bottlenecks, and network efficiency.",
+      "agy_agent": "web-performance-auditor"
+    },
+    {
+      "id": "lead-software-engineer",
+      "name": "Senior Fullstack Software Architect",
+      "description": "General-purpose senior developer for end-to-end multi-file features, complex system refactoring, and large-scale implementations.",
+      "agy_agent": ""
+    }
+  ]
+}
+

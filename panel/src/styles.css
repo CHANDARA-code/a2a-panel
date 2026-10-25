@@ -1,0 +1,35 @@
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  -webkit-text-size-adjust: 100%;
+}
+
+.task-row {
+  cursor: pointer;
+}
+
+.log-view {
+  margin: 0;
+  padding: 12px;
+  max-height: 50dvh;
+  min-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.ant-segmented {
+  white-space: nowrap;
+}
+
+@media (max-width: 767px) {
+  .ant-drawer-body {
+    padding: 12px;
+  }
+}

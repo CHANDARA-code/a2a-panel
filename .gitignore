@@ -1,0 +1,8 @@
+token
+logs/
+server.log
+server.err
+node_modules/
+panel/node_modules/
+panel/dist/
+.DS_Store
