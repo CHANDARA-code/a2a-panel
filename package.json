@@ -22,6 +22,7 @@
   },
   "scripts": {
     "test": "node --test test/server.test.js",
+    "check": "node scripts/check-consistency.js",
     "build:panel": "npm --prefix panel install && npm --prefix panel run build",
     "prepack": "npm run build:panel"
   },

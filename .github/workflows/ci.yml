@@ -1,0 +1,82 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Syntax and consistency
+        run: npm run check
+      - name: Package contents
+        run: |
+          npm pack --dry-run --ignore-scripts --json > pack.json
+          node -e "
+            const files = JSON.parse(require('fs').readFileSync('pack.json', 'utf8'))[0].files.map((f) => f.path);
+            const banned = files.filter((f) => /^(test|logs|scripts|\.github)\//.test(f) || /(^|\/)(token|server\.(log|err|pid))$/.test(f));
+            if (banned.length) { console.error('Files that must not be published:', banned); process.exit(1); }
+            for (const need of ['cli.js', 'dispatcher.js', 'mcp-server.js', 'LICENSE', 'personas/web-engineer.md']) {
+              if (!files.includes(need)) { console.error('Missing from package:', need); process.exit(1); }
+            }
+            console.log('Package has', files.length, 'files');
+          "
+
+  panel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: panel/package-lock.json
+      - run: npm --prefix panel ci
+      - run: npm --prefix panel run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: panel-dist
+          path: panel/dist
+          retention-days: 7
+
+  test:
+    needs: panel
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: [20, 22]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: panel-dist
+          path: panel/dist
+      - run: npm test
+
+  audit:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm --prefix panel audit --audit-level=high

@@ -2,7 +2,7 @@ const { test, before, after } = require('node:test');
 const assert = require('node:assert');
 const http = require('node:http');
 const net = require('node:net');
-const { spawn, execFileSync } = require('node:child_process');
+const { spawn, spawnSync, execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -565,4 +565,27 @@ test('the server refuses to bind to a non-loopback address', () => {
   });
   assert.strictEqual(result.status, 1);
   assert.match(result.stderr, /Refusing to listen/);
+});
+
+test('the consistency check passes on this repo and fails when the role lists drift', () => {
+  const script = path.join(ROOT, 'scripts', 'check-consistency.js');
+  const ok = spawnSync(process.execPath, [script], { encoding: 'utf-8' });
+  assert.strictEqual(ok.status, 0, ok.stderr);
+
+  const copy = fs.mkdtempSync(path.join(os.tmpdir(), 'a2a-consistency-'));
+  for (const name of fs.readdirSync(ROOT)) {
+    if (name.endsWith('.js') || ['agent-card.json', 'agent.json', 'README.md', 'package.json'].includes(name)) {
+      fs.copyFileSync(path.join(ROOT, name), path.join(copy, name));
+    }
+  }
+  fs.cpSync(path.join(ROOT, 'personas'), path.join(copy, 'personas'), { recursive: true });
+  const mcp = path.join(copy, 'mcp-server.js');
+  fs.writeFileSync(mcp, fs.readFileSync(mcp, 'utf-8').replace("            'devops-engineer',\n", ''));
+  const drifted = spawnSync(process.execPath, [script, copy], { encoding: 'utf-8' });
+  assert.strictEqual(drifted.status, 1);
+  assert.match(drifted.stderr, /role enum .* differs from agent-card\.json/);
+
+  fs.rmSync(path.join(copy, 'personas', 'test-engineer.md'));
+  const noPersona = spawnSync(process.execPath, [script, copy], { encoding: 'utf-8' });
+  assert.match(noPersona.stderr, /no persona file personas\/test-engineer\.md/);
 });
