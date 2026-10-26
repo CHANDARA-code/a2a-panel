@@ -17,6 +17,12 @@ case "$FAKE_AGY_MODE" in
     echo '{"event":"result","result":{"conversation_id":"conv-12345678","status":"SUCCESS","response":"Hello world","duration_seconds":1.5,"usage":{"input_tokens":100,"output_tokens":20,"thinking_tokens":0,"cache_read_tokens":50,"total_tokens":120}}}'
     exit 0
     ;;
+  tools)
+    echo '{"event":"step_update","step_update":{"step_index":1,"state":"DONE","step_type":"tool","tool_name":"run_command","tool_info":{"name":"run_command","parameters":{"CommandLine":"npm test"}}}}'
+    printf '%s\n' '{"event":"step_update","step_update":{"step_index":2,"state":"ERROR","step_type":"tool","tool_name":"run_command","tool_info":{"name":"run_command","parameters":{"CommandLine":"ls -la"},"error":{"type":"TOOL_ERROR","message":"user denied permission to run command:\nls -la"}}}}'
+    echo '{"event":"result","result":{"status":"SUCCESS","response":"done","usage":{"total_tokens":7},"denied_actions":[{"action":"command","display_name":"RunCommand"}]}}'
+    exit 0
+    ;;
   failed)
     echo '{"event":"result","result":{"status":"ERROR","response":"","usage":{"total_tokens":5}}}'
     exit 0

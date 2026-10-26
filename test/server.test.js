@@ -418,6 +418,14 @@ test('stream-json output becomes readable text, with usage and conversation id c
   assert.strictEqual(logged[0].role, 'web-engineer');
 });
 
+test('tool steps are logged with their arguments, and failed steps and denied actions are reported', () => {
+  const { result } = runInProcess('tools');
+  assert.match(result.log, /\[tool\] run_command: npm test/);
+  assert.match(result.log, /\[error\] run_command: ls -la \(user denied permission to run command:\)/);
+  assert.ok(result.output.startsWith('done'));
+  assert.match(result.output, /denied these actions: RunCommand/);
+});
+
 test('an agent result whose status is not SUCCESS marks the task failed', () => {
   const { result } = runInProcess('failed');
   assert.strictEqual(result.status, 'failed');
@@ -601,4 +609,25 @@ test('the consistency check passes on this repo and fails when the role lists dr
   fs.rmSync(path.join(copy, 'personas', 'test-engineer.md'));
   const noPersona = spawnSync(process.execPath, [script, copy], { encoding: 'utf-8' });
   assert.match(noPersona.stderr, /no persona file personas\/test-engineer\.md/);
+});
+
+test('an async task reports usage, verification and conversation id through GET /tasks/:id and tasks/get', async () => {
+  const instance = await startInstance({ FAKE_AGY_MODE: 'stream' });
+  const sent = await fetch(`${instance.base}/tasks/send`, {
+    method: 'POST',
+    headers: authed(),
+    body: JSON.stringify({ role: 'web-engineer', prompt: 'x', workspace: instance.workspace, mode: 'plan', async: true, verification_command: 'exit 0' })
+  });
+  const { taskId } = await sent.json();
+  const task = await waitFor(async () => {
+    const body = await (await fetch(`${instance.base}/tasks/${taskId}`)).json();
+    return body.status === 'completed' && body.verification ? body : null;
+  });
+  assert.strictEqual(task.usage.total_tokens, 120);
+  assert.strictEqual(task.verification.passed, true);
+  assert.strictEqual(task.conversationId, 'conv-12345678');
+  assert.strictEqual(task.workspace, instance.workspace);
+  const rpc = await instanceRpc(instance, 'tasks/get', { id: taskId });
+  assert.strictEqual(rpc.result.usage.total_tokens, 120);
+  assert.strictEqual(rpc.result.verification.passed, true);
 });

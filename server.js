@@ -147,7 +147,12 @@ const server = http.createServer(async (req, res) => {
         finishedAt: task.finishedAt,
         exitCode: task.exitCode,
         output: task.output,
-        error: task.error
+        error: task.error,
+        workspace: task.workspace,
+        usage: task.usage || null,
+        verification: task.verification || null,
+        conversationId: task.conversationId || null,
+        changes: task.changes || null
       });
     }
 
@@ -365,7 +370,13 @@ const server = http.createServer(async (req, res) => {
               parts: [{ text: task.output }]
             },
             output: task.output,
-            exitCode: task.exitCode
+            exitCode: task.exitCode,
+            error: task.error,
+            workspace: task.workspace,
+            usage: task.usage || null,
+            verification: task.verification || null,
+            conversationId: task.conversationId || null,
+            changes: task.changes || null
           }
         });
       }

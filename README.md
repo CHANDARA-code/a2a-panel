@@ -131,7 +131,7 @@ When running `agy-bridge server start`:
 - **Health Check**: `GET http://127.0.0.1:5188/health`
 - **List Roles**: `GET http://127.0.0.1:5188/roles`
 - **Dispatch Task**: `POST http://127.0.0.1:5188/tasks/send`
-- **Task Status**: `GET http://127.0.0.1:5188/tasks/:id`
+- **Task Status**: `GET http://127.0.0.1:5188/tasks/:id`. Returns status, output, `usage`, `verification`, `conversationId`, `changes` and `workspace`, so an async caller gets the same facts as a synchronous one. JSON-RPC `tasks/get` returns the same fields.
 - **JSON-RPC 2.0**: `POST http://127.0.0.1:5188/rpc` with `message/send`, `tasks/get`, `tasks/list` and `tasks/cancel`. Streaming and push notifications are not implemented; the agent card says so.
 
 ---
@@ -144,6 +144,7 @@ Open `http://127.0.0.1:5188/dashboard` (or run `agy-bridge dashboard`).
 - Control: dispatch a task (specialist, workspace, prompt, plan/edit mode, effort), cancel a running task, run a task again.
 - Built with React, Vite and Ant Design in `panel/`. Light and dark themes.
 - Tasks started from Claude Code (MCP) or the CLI show up too, because the panel reads the task logs and PID files in `logs/`.
+- The live log shows each tool the agent runs, with its main argument, for example `[tool] run_command: npm test` or `[tool] read_file: /path/to/file.ts`. A tool call that fails shows as `[error] <tool>: <args> (<reason>)`. If `agy` reports denied actions, the task output ends with `[A2A] Antigravity denied these actions: …`.
 
 Rebuild after changing the UI:
 
@@ -154,6 +155,52 @@ npm run build   # type-checks, then writes panel/dist
 ```
 
 `npm run dev` serves the UI on port 5173 with `/api` proxied to the server. Set `VITE_A2A_TOKEN` to the contents of `token` for write calls in dev.
+
+### Example: building an eMenu with the team
+
+This walkthrough built an eMenu app (NestJS API + React web) in an empty git repository at `~/Downloads/emenu`. All the coding and testing was done by Antigravity agents.
+
+1. Two tasks were sent in parallel with `POST /tasks/send` and `"async": true`. The `api-engineer` built the NestJS backend in `api/`, and the `web-engineer` built the React + Vite frontend in `web/`. Each task had a `verification_command` (`cd api && npm run build && npm test`, `cd web && npm run build && npm test -- --run`).
+2. Both agents finished in about 10–12 minutes. The bridge then ran each verification command itself, and both passed: 32 API tests and 24 web tests.
+3. A `code-reviewer` task in `plan` mode then reviewed both halves without editing files, and reported 13 findings ranked by severity.
+
+**Overview while a task runs.** Stat cards, status filter, search and the task table. Running tasks have a Cancel button.
+
+![Overview while a task is running](docs/screenshots/01-overview-running.png)
+
+**Status filter.** The "Running" filter while the `api-engineer` and `web-engineer` worked in parallel.
+
+![Running filter](docs/screenshots/02-filter-running.png)
+
+**Task detail with live log.** Click a task to open its details, prompt and live log. Each tool call appears as it happens.
+
+![Task detail with live log](docs/screenshots/03-task-detail-live-log.png)
+
+**New task.** Pick a specialist, workspace, prompt, mode (plan only or edit files) and effort.
+
+![New task dialog](docs/screenshots/04-new-task-dialog.png)
+
+**All tasks completed.**
+
+![Overview after all tasks completed](docs/screenshots/05-overview-completed.png)
+
+**Completed task.** Finish time, exit code and the full result. The code review's findings are at the end of the log.
+
+![Completed task detail](docs/screenshots/06-task-detail-completed.png)
+
+**Dark theme.**
+
+![Dark theme](docs/screenshots/07-dark-theme.png)
+
+**Mobile layout.**
+
+<img src="docs/screenshots/08-mobile.png" alt="Mobile layout" width="320">
+
+**The result.** The customer menu and the kitchen order board the agents built:
+
+![eMenu customer menu](docs/screenshots/emenu-menu.png)
+
+![eMenu kitchen board](docs/screenshots/emenu-kitchen.png)
 
 ## 5. Security model
 
