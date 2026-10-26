@@ -1,0 +1,4 @@
+{
+  "title": "NestJS API + React web",
+  "description": "TypeScript monorepo: NestJS REST API with Prisma and PostgreSQL, React + Vite frontend with Ant Design and TanStack Query."
+}

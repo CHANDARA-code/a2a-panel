@@ -6,6 +6,7 @@ const http = require('http');
 const { spawn } = require('child_process');
 const { DATA_DIR } = require('./config');
 const { getAgentCard, runAgyTask, cancelTask, activeTasks, readUsageTotals } = require('./dispatcher');
+const presets = require('./presets');
 
 const PORT = parseInt(process.env.A2A_PORT || '5188', 10);
 const HOST = process.env.A2A_HOST || '127.0.0.1';
@@ -29,6 +30,12 @@ Usage:
   agy-bridge logs [taskId] [-f]        View or stream live logs of a task (or latest task)
   agy-bridge dashboard [--no-open]     Open the web task panel (monitor, dispatch, cancel)
   agy-bridge run <role> "<task prompt>"  Dispatch task to an Antigravity developer
+  agy-bridge presets [list]            List preference presets (coding style, libraries, tech defaults)
+  agy-bridge presets show <id>         Print a preset's markdown files
+  agy-bridge presets templates         List the starter templates presets can be created from
+  agy-bridge presets new <id> [--template <t> | --from <preset>]   Create a preset
+  agy-bridge presets default <id|none> Set or clear the preset used when none is given
+  agy-bridge presets delete <id>       Delete a preset
   agy-bridge server start              Start A2A protocol HTTP & JSON-RPC daemon in background
   agy-bridge server stop               Stop background A2A daemon
   agy-bridge server restart            Restart A2A daemon
@@ -40,6 +47,7 @@ Options for "agy-bridge run":
   --mode <mode>        Execution mode: accept-edits (default), plan
   --effort <effort>    Reasoning effort: low, medium, high (default), xhigh, max
   --async              Run in background and print task ID
+  --preset <id|none>   Preference preset to include (defaults to the default preset)
 
 Available Roles:
   web-engineer, api-engineer, mobile-engineer, desktop-engineer,
@@ -186,6 +194,7 @@ async function handleRun(args) {
   let mode = 'accept-edits';
   let effort = 'high';
   let isAsync = false;
+  let preset;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--workspace' && args[i + 1]) {
@@ -196,6 +205,9 @@ async function handleRun(args) {
       i++;
     } else if (args[i] === '--effort' && args[i + 1]) {
       effort = args[i + 1];
+      i++;
+    } else if (args[i] === '--preset' && args[i + 1]) {
+      preset = args[i + 1];
       i++;
     } else if (args[i] === '--async') {
       isAsync = true;
@@ -219,13 +231,21 @@ async function handleRun(args) {
     process.exit(1);
   }
 
+  let presetId;
+  try {
+    presetId = presets.resolvePresetId(preset);
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
+    process.exit(1);
+  }
+
   console.log(`\n\x1b[1m\x1b[34m[A2A Dispatch]\x1b[0m Assigning task to Antigravity \x1b[36m${role}\x1b[0m...`);
   console.log(`Workspace: ${workspace}`);
-  console.log(`Mode: ${mode} | Effort: ${effort}`);
+  console.log(`Mode: ${mode} | Effort: ${effort} | Preset: ${presetId || 'none'}`);
   console.log(`------------------------------------------------------------------------`);
 
   if (isAsync) {
-    const { taskId, taskRecord } = runAgyTask({ role, prompt, workspace, mode, effort });
+    const { taskId, taskRecord } = runAgyTask({ role, prompt, workspace, mode, effort, preset });
     console.log(`Task dispatched in background.`);
     console.log(`Task ID: ${taskId}`);
     return;
@@ -247,6 +267,7 @@ async function handleRun(args) {
     workspace,
     mode,
     effort,
+    preset,
     onChunk: (chunk) => {
       process.stdout.write(chunk);
     },
@@ -259,6 +280,64 @@ async function handleRun(args) {
       process.exit(1);
     }
   });
+}
+
+function handlePresets(args) {
+  const [sub = 'list', id, ...rest] = args;
+  const option = (name) => {
+    const index = rest.indexOf(name);
+    return index >= 0 ? rest[index + 1] : undefined;
+  };
+  try {
+    if (sub === 'list') {
+      const list = presets.listPresets();
+      if (!list.length) {
+        console.log('No presets yet. Create one from a template, for example:');
+        console.log('  agy-bridge presets templates');
+        console.log('  agy-bridge presets new my-team --template nestjs-react');
+        return;
+      }
+      console.log(`\nPresets (${presets.PRESETS_DIR})`);
+      for (const preset of list) {
+        console.log(`\n\x1b[1m\x1b[36m${preset.id}\x1b[0m${preset.isDefault ? ' \x1b[32m(default)\x1b[0m' : ''}  ${preset.title}`);
+        if (preset.description) console.log(`  ${preset.description}`);
+        for (const file of preset.files) console.log(`  - ${file.name}${file.roles ? `  [${file.roles.join(', ')}]` : '  [all roles]'}`);
+      }
+      return;
+    }
+    if (sub === 'templates') {
+      for (const template of presets.listTemplates()) {
+        console.log(`\x1b[1m${template.id}\x1b[0m  ${template.title}\n  ${template.description}\n  files: ${template.files.map((f) => f.name).join(', ')}\n`);
+      }
+      return;
+    }
+    if (!id) throw new Error(`"agy-bridge presets ${sub}" needs a preset id`);
+    if (sub === 'show') {
+      const preset = presets.getPreset(id);
+      console.log(`# ${preset.title}${preset.isDefault ? ' (default)' : ''}\n${preset.description}`);
+      for (const file of preset.files) console.log(`\n===== ${file.name} =====\n${file.content.trim()}`);
+      return;
+    }
+    if (sub === 'new') {
+      const preset = presets.createPreset({ id, template: option('--template'), from: option('--from'), title: option('--title') });
+      console.log(`Created preset "${preset.id}" with ${preset.files.length} file(s) in ${path.join(presets.PRESETS_DIR, preset.id)}`);
+      return;
+    }
+    if (sub === 'default') {
+      const value = presets.setDefaultPresetId(id === 'none' ? null : id);
+      console.log(value ? `Default preset is now "${value}".` : 'No default preset. Tasks run without preferences unless one is given.');
+      return;
+    }
+    if (sub === 'delete') {
+      presets.deletePreset(id);
+      console.log(`Deleted preset "${id}".`);
+      return;
+    }
+    throw new Error(`Unknown presets command "${sub}". Use list, show, templates, new, default or delete.`);
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
+    process.exit(1);
+  }
 }
 
 async function handleTasks() {
@@ -461,6 +540,11 @@ async function main() {
 
   if (cmd === 'mcp') {
     require('./mcp-server');
+    return;
+  }
+
+  if (cmd === 'presets' || cmd === 'preset') {
+    handlePresets(args.slice(1));
     return;
   }
 

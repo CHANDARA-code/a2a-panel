@@ -7,3 +7,4 @@ panel/node_modules/
 panel/dist/
 .DS_Store
 server.pid
+presets/

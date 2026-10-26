@@ -11,6 +11,8 @@ const ROOT = path.join(__dirname, '..');
 const TOKEN = 'a'.repeat(64);
 const FAKE_AGENT = path.join(__dirname, 'fake-agy.sh');
 const instances = [];
+// Keep every server and in-process run away from the user's own presets (and their default preset).
+process.env.A2A_PRESETS_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'a2a-presets-'));
 
 function authed(extra = {}) {
   return { 'X-A2A-Token': TOKEN, 'Content-Type': 'application/json', ...extra };
@@ -630,4 +632,95 @@ test('an async task reports usage, verification and conversation id through GET 
   const rpc = await instanceRpc(instance, 'tasks/get', { id: taskId });
   assert.strictEqual(rpc.result.usage.total_tokens, 120);
   assert.strictEqual(rpc.result.verification.passed, true);
+});
+
+async function presetInstance() {
+  return startInstance({ A2A_PRESETS_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'a2a-presets-')) });
+}
+
+async function api(instance, method, requestPath, body) {
+  const res = await fetch(`${instance.base}${requestPath}`, { method, headers: authed(), body: body === undefined ? undefined : JSON.stringify(body) });
+  return { status: res.status, body: await res.json() };
+}
+
+function taskLog(instance, taskId) {
+  return fs.readFileSync(path.join(instance.logsDir, `${taskId}.log`), 'utf-8');
+}
+
+test('presets start empty and can be created from a template, edited, made default and deleted', async () => {
+  const instance = await presetInstance();
+  const empty = await api(instance, 'GET', '/api/presets');
+  assert.deepStrictEqual(empty.body.presets, []);
+  assert.strictEqual(empty.body.defaultPreset, null);
+  assert.ok(empty.body.templates.some((t) => t.id === 'nestjs-react'));
+
+  const created = await api(instance, 'POST', '/api/presets', { id: 'team', template: 'nestjs-react' });
+  assert.strictEqual(created.status, 201);
+  assert.ok(created.body.preset.files.some((f) => f.name === 'frontend.md' && f.roles.includes('web-engineer')));
+  assert.strictEqual((await api(instance, 'POST', '/api/presets', { id: 'team' })).status, 409);
+  assert.strictEqual((await api(instance, 'POST', '/api/presets', { id: 'none' })).status, 400);
+
+  const files = [{ name: 'style.md', content: '- tabs, not spaces' }];
+  const updated = await api(instance, 'PUT', '/api/presets/team', { title: 'Team', description: 'd', files });
+  assert.strictEqual(updated.status, 200);
+  assert.deepStrictEqual(updated.body.preset.files.map((f) => f.name), ['style.md']);
+  assert.strictEqual((await api(instance, 'PUT', '/api/presets/team', { files: [{ name: '../evil.md', content: 'x' }] })).status, 400);
+
+  assert.strictEqual((await api(instance, 'POST', '/api/presets/team/default')).body.defaultPreset, 'team');
+  const unauth = await fetch(`${instance.base}/api/presets/team`, { method: 'DELETE' });
+  assert.strictEqual(unauth.status, 401);
+  assert.strictEqual((await api(instance, 'DELETE', '/api/presets/team')).status, 200);
+  const after = await api(instance, 'GET', '/api/presets');
+  assert.deepStrictEqual(after.body.presets, []);
+  assert.strictEqual(after.body.defaultPreset, null);
+});
+
+test('a dispatched task gets the default preset files scoped to its role, with workspace files overriding', async () => {
+  const instance = await presetInstance();
+  await api(instance, 'POST', '/api/presets', { id: 'team', template: 'nestjs-react' });
+  await api(instance, 'POST', '/api/presets/team/default');
+  fs.mkdirSync(path.join(instance.workspace, '.agy', 'preferences'), { recursive: true });
+  fs.writeFileSync(path.join(instance.workspace, '.agy', 'preferences', 'frontend.md'), '---\nroles: [web-engineer]\n---\n- Use MUI for this repo.\n');
+
+  const web = await dispatch(instance, { role: 'web-engineer' });
+  const webLog = taskLog(instance, web.body.taskId);
+  assert.match(webLog, /^Preset: team$/m);
+  assert.match(webLog, /### USER PREFERENCES \(preset: team\)/);
+  assert.match(webLog, /Use MUI for this repo/);
+  assert.ok(!webLog.includes('Ant Design 5'));
+  assert.ok(!webLog.includes('#### api.md'));
+
+  const apiTask = await dispatch(instance, { role: 'api-engineer' });
+  const apiLog = taskLog(instance, apiTask.body.taskId);
+  assert.match(apiLog, /#### api\.md/);
+  assert.ok(!apiLog.includes('Use MUI'));
+
+  const none = await dispatch(instance, { role: 'web-engineer', preset: null });
+  const noneLog = taskLog(instance, none.body.taskId);
+  assert.match(noneLog, /^Preset: none$/m);
+  assert.match(noneLog, /^Preferences: frontend\.md \(workspace\)$/m);
+
+  const listed = await (await fetch(`${instance.base}/api/tasks/${web.body.taskId}`)).json();
+  assert.strictEqual(listed.task.preset, 'team');
+  assert.ok(listed.task.preferences.includes('frontend.md (workspace)'));
+
+  for (const id of [web.body.taskId, apiTask.body.taskId, none.body.taskId]) await fetch(`${instance.base}/api/tasks/${id}/cancel`, { method: 'POST', headers: authed() });
+});
+
+test('an unknown preset is refused by every dispatch endpoint, and the prompt preview shows the preset', async () => {
+  const instance = await presetInstance();
+  const panel = await dispatch(instance, { preset: 'missing' });
+  assert.strictEqual(panel.res.status, 400);
+  assert.match(panel.body.error, /Unknown preset "missing"/);
+  const rest = await api(instance, 'POST', '/tasks/send', { role: 'web-engineer', prompt: 'x', workspace: instance.workspace, preset: 'missing', async: true });
+  assert.strictEqual(rest.status, 400);
+  const rpc = await instanceRpc(instance, 'message/send', { skill: 'web-engineer', prompt: 'x', workspace: instance.workspace, preset: 'missing', async: true });
+  assert.strictEqual(rpc.error.code, -32602);
+
+  await api(instance, 'POST', '/api/presets', { id: 'team', template: 'nestjs-react' });
+  const preview = await api(instance, 'POST', '/api/prompt-preview', { role: 'api-engineer', preset: 'team', prompt: 'Add orders', workspace: instance.workspace });
+  assert.strictEqual(preview.status, 200);
+  assert.strictEqual(preview.body.preset, 'team');
+  assert.ok(preview.body.files.some((f) => f.name === 'api.md'));
+  assert.match(preview.body.prompt, /### TASK\nAdd orders$/);
 });

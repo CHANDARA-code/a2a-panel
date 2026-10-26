@@ -2,6 +2,7 @@ const { spawn, execFileSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const { createStreamParser } = require('./agy-stream');
+const { resolvePreferences } = require('./presets');
 
 const { DATA_DIR } = require('./config');
 
@@ -366,7 +367,36 @@ function readUsageTotals() {
   return totals;
 }
 
-function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = 'high', model, conversation_id, acceptance_criteria, verification_command, onChunk, onDone, onError }) {
+// The full prompt an agent receives: role persona, user preferences, task, criteria, verification step.
+function buildTaskPrompt({ role, prompt, workspace, preset, acceptance_criteria, verification_command }) {
+  const card = getAgentCard();
+  const list = card.skills || card.roles || [];
+  const skillConfig = list.find(r => r.id === role);
+  const agyAgentName = skillConfig && skillConfig.agy_agent ? skillConfig.agy_agent : (role && role !== 'lead-software-engineer' ? role : null);
+  const preferences = resolvePreferences({ preset, role: role || 'lead-software-engineer', workspace });
+
+  const sections = [];
+  const rolePersona = loadRolePersona(agyAgentName);
+  if (rolePersona) sections.push(`### YOUR ROLE (${agyAgentName})\n${rolePersona}`);
+  if (preferences.text) sections.push(preferences.text);
+  let finalPrompt = sections.length ? `${sections.join('\n\n')}\n\n### TASK\n${prompt}` : prompt;
+  if (acceptance_criteria) {
+    const formattedCriteria = Array.isArray(acceptance_criteria)
+      ? acceptance_criteria.map((c, i) => `${i + 1}. ${c}`).join('\n')
+      : acceptance_criteria;
+    finalPrompt += `\n\n### MANDATORY ACCEPTANCE CRITERIA:\n${formattedCriteria}`;
+  }
+  if (verification_command) {
+    finalPrompt += `\n\n### VERIFICATION & VALIDATION STEP:\nBefore declaring completion, execute the following command in the workspace and verify it passes:\n\`${verification_command}\`\nReport the command exit status and test summary in your final output.`;
+  }
+  return { finalPrompt, preferences };
+}
+
+function preferenceFileList(preferences) {
+  return preferences.files.map((file) => (file.source === 'workspace' ? `${file.name} (workspace)` : file.name)).join(', ');
+}
+
+function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = 'high', model, conversation_id, preset, acceptance_criteria, verification_command, onChunk, onDone, onError }) {
   if (typeof prompt !== 'string' || !prompt.trim() || prompt.trim().startsWith('--')) {
     throw new Error('Invalid task prompt: ' + JSON.stringify(prompt) + ' (empty or looks like a CLI flag)');
   }
@@ -393,25 +423,7 @@ function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = '
     throw new Error('A workspace path is required (refusing to run agents inside the bridge directory)');
   }
 
-  const card = getAgentCard();
-  const list = card.skills || card.roles || [];
-  const skillConfig = list.find(r => r.id === role);
-  const agyAgentName = skillConfig && skillConfig.agy_agent ? skillConfig.agy_agent : (role && role !== 'lead-software-engineer' ? role : null);
-
-  let finalPrompt = prompt;
-  const rolePersona = loadRolePersona(agyAgentName);
-  if (rolePersona) {
-    finalPrompt = `### YOUR ROLE (${agyAgentName})\n${rolePersona}\n\n### TASK\n${prompt}`;
-  }
-  if (acceptance_criteria) {
-    const formattedCriteria = Array.isArray(acceptance_criteria)
-      ? acceptance_criteria.map((c, i) => `${i + 1}. ${c}`).join('\n')
-      : acceptance_criteria;
-    finalPrompt += `\n\n### MANDATORY ACCEPTANCE CRITERIA:\n${formattedCriteria}`;
-  }
-  if (verification_command) {
-    finalPrompt += `\n\n### VERIFICATION & VALIDATION STEP:\nBefore declaring completion, execute the following command in the workspace and verify it passes:\n\`${verification_command}\`\nReport the command exit status and test summary in your final output.`;
-  }
+  const { finalPrompt, preferences } = buildTaskPrompt({ role, prompt, workspace: targetCwd, preset, acceptance_criteria, verification_command });
 
   const args = [
     '-p', finalPrompt,
@@ -429,6 +441,8 @@ function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = '
     `=== TASK STARTED: ${taskId} ===`,
     `Role: ${role || 'lead-software-engineer'}`,
     `Workspace: ${targetCwd}`,
+    `Preset: ${preferences.presetId || 'none'}`,
+    `Preferences: ${preferenceFileList(preferences) || 'none'}`,
     `Started: ${new Date().toISOString()}`,
     `Prompt:\n${finalPrompt}`,
     `--------------------------------------------------\n\n`
@@ -446,6 +460,8 @@ function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = '
     logFile: logFilePath,
     output: '',
     model: model || null,
+    preset: preferences.presetId,
+    preferenceFiles: preferences.files.map((file) => ({ name: file.name, source: file.source })),
     conversationId: conversation_id || null,
     usage: null,
     verification: null,
@@ -645,6 +661,7 @@ function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = '
 module.exports = {
   AGY_BIN,
   getAgentCard,
+  buildTaskPrompt,
   runAgyTask,
   cancelTask,
   isTaskProcessLive,

@@ -3,6 +3,7 @@ const url = require('url');
 const { getAgentCard, runAgyTask, cancelTask, activeTasks } = require('./dispatcher');
 const dashboard = require('./dashboard');
 const security = require('./security');
+const presets = require('./presets');
 
 process.on('unhandledRejection', (err) => {
   console.error('[A2A Protocol Server] Unhandled rejection:', err && err.message);
@@ -59,6 +60,18 @@ function extractPromptFromParams(params) {
     }
   }
   return null;
+}
+
+// Message for a "preset" request field that is not a known preset id, null, "" or "none".
+function presetError(preset) {
+  if (preset === undefined) return null;
+  if (preset !== null && typeof preset !== 'string') return 'preset must be a preset id, or null for none';
+  try {
+    presets.resolvePresetId(preset);
+    return null;
+  } catch (err) {
+    return err.message;
+  }
 }
 
 const server = http.createServer(async (req, res) => {
@@ -152,7 +165,9 @@ const server = http.createServer(async (req, res) => {
         usage: task.usage || null,
         verification: task.verification || null,
         conversationId: task.conversationId || null,
-        changes: task.changes || null
+        changes: task.changes || null,
+        preset: task.preset || null,
+        preferenceFiles: task.preferenceFiles || []
       });
     }
 
@@ -182,18 +197,24 @@ const server = http.createServer(async (req, res) => {
       const model = body.model;
       const conversation_id = body.conversation_id;
       const verification_command = typeof body.verification_command === 'string' ? body.verification_command : undefined;
+      const preset = body.preset;
       const isAsync = body.isAsync || body.async || false;
 
       if (!prompt) {
         return sendJson(res, 400, { error: 'Missing required parameter: "prompt" or "message"' });
       }
+      const presetProblem = presetError(preset);
+      if (presetProblem) {
+        return sendJson(res, 400, { error: presetProblem });
+      }
 
       if (isAsync) {
-        const { taskId, taskRecord } = runAgyTask({ role, prompt, workspace, mode, effort, model, conversation_id, verification_command });
+        const { taskId, taskRecord } = runAgyTask({ role, prompt, workspace, mode, effort, model, conversation_id, verification_command, preset });
         return sendJson(res, 202, {
           taskId,
           status: 'running',
           skill: taskRecord.role,
+          preset: taskRecord.preset,
           workspace: taskRecord.workspace,
           checkUrl: `http://${HOST}:${PORT}/tasks/${taskId}`
         });
@@ -209,9 +230,12 @@ const server = http.createServer(async (req, res) => {
           model,
           conversation_id,
           verification_command,
+          preset,
           onDone: (taskRecord) => {
             sendJson(res, 200, {
               taskId: taskRecord.id,
+              preset: taskRecord.preset,
+              preferenceFiles: taskRecord.preferenceFiles,
               usage: taskRecord.usage,
               verification: taskRecord.verification,
               conversationId: taskRecord.conversationId,
@@ -275,6 +299,7 @@ const server = http.createServer(async (req, res) => {
         const model = params && params.model;
         const conversation_id = params && params.conversation_id;
         const verification_command = params && typeof params.verification_command === 'string' ? params.verification_command : undefined;
+        const preset = params ? params.preset : undefined;
         const isAsync = (params && (params.isAsync || params.async)) || false;
 
         if (!prompt) {
@@ -284,16 +309,21 @@ const server = http.createServer(async (req, res) => {
             error: { code: -32602, message: 'Missing parameter: prompt or message.parts[].text' }
           });
         }
+        const presetProblem = presetError(preset);
+        if (presetProblem) {
+          return sendJson(res, 200, { jsonrpc: '2.0', id, error: { code: -32602, message: presetProblem } });
+        }
 
         if (isAsync) {
-          const { taskId, taskRecord } = runAgyTask({ role, prompt, workspace, mode, effort, model, conversation_id, verification_command });
+          const { taskId, taskRecord } = runAgyTask({ role, prompt, workspace, mode, effort, model, conversation_id, verification_command, preset });
           return sendJson(res, 200, {
             jsonrpc: '2.0',
             id,
             result: {
               taskId,
               status: 'running',
-              skill: taskRecord.role
+              skill: taskRecord.role,
+              preset: taskRecord.preset
             }
           });
         }
@@ -308,6 +338,7 @@ const server = http.createServer(async (req, res) => {
             model,
             conversation_id,
             verification_command,
+            preset,
             onDone: (taskRecord) => {
               sendJson(res, 200, {
                 jsonrpc: '2.0',
@@ -376,7 +407,9 @@ const server = http.createServer(async (req, res) => {
             usage: task.usage || null,
             verification: task.verification || null,
             conversationId: task.conversationId || null,
-            changes: task.changes || null
+            changes: task.changes || null,
+            preset: task.preset || null,
+            preferenceFiles: task.preferenceFiles || []
           }
         });
       }

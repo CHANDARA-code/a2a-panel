@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Card, Empty, Flex, Popconfirm, Table, Tooltip, Typography } from "antd";
+import { Button, Card, Empty, Flex, Popconfirm, Table, Tag, Tooltip, Typography } from "antd";
 import type { TableColumnsType } from "antd";
 import { StopOutlined } from "@ant-design/icons";
 import type { Task } from "../api";
@@ -57,9 +57,10 @@ export function TaskList({ tasks, loading, isMobile, cancelling, onOpen, onCance
                 {formatAgo(task.startedAt)} · {formatDuration(task.durationMs)}
               </Typography.Text>
             </Flex>
-            <Typography.Text strong style={{ display: "block", marginTop: 8 }}>
-              {task.role}
-            </Typography.Text>
+            <Flex align="center" gap={6} style={{ marginTop: 8 }}>
+              <Typography.Text strong>{task.role}</Typography.Text>
+              {task.preset && <Tag style={{ marginInlineEnd: 0 }}>{task.preset}</Tag>}
+            </Flex>
             <Typography.Paragraph ellipsis={{ rows: 2 }} style={{ margin: "4px 0 0" }}>
               {task.promptPreview || "-"}
             </Typography.Paragraph>
@@ -84,7 +85,21 @@ export function TaskList({ tasks, loading, isMobile, cancelling, onOpen, onCance
 
   const columns: TableColumnsType<Task> = [
     { title: "Status", dataIndex: "status", width: 130, render: (_, task) => <StatusTag task={task} /> },
-    { title: "Role", dataIndex: "role", width: 190, ellipsis: true },
+    {
+      title: "Role",
+      dataIndex: "role",
+      width: 190,
+      render: (_, task) => (
+        <>
+          <Typography.Text ellipsis style={{ display: "block" }}>{task.role}</Typography.Text>
+          {task.preset && (
+            <Tooltip title={`Preset: ${task.preset}`}>
+              <Tag style={{ marginTop: 4, marginInlineEnd: 0, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis" }}>{task.preset}</Tag>
+            </Tooltip>
+          )}
+        </>
+      ),
+    },
     {
       title: "Task",
       dataIndex: "promptPreview",

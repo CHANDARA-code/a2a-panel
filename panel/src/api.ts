@@ -14,6 +14,8 @@ export interface Task {
   cancellable: boolean;
   cancelRequested: boolean;
   error: string | null;
+  preset?: string | null;
+  preferences?: string[];
   promptPreview?: string;
   prompt?: string;
 }
@@ -44,6 +46,48 @@ export interface DispatchInput {
   prompt: string;
   mode: string;
   effort: string;
+  preset?: string | null;
+}
+
+export interface PresetFileSummary {
+  name: string;
+  roles: string[] | null;
+}
+
+export interface PresetSummary {
+  id: string;
+  title: string;
+  description: string;
+  isDefault: boolean;
+  files: PresetFileSummary[];
+}
+
+export interface PresetFile {
+  name: string;
+  content: string;
+}
+
+export interface Preset extends Omit<PresetSummary, "files"> {
+  files: (PresetFile & { roles: string[] | null })[];
+}
+
+export interface PresetsResponse {
+  presets: PresetSummary[];
+  templates: Omit<PresetSummary, "isDefault">[];
+  defaultPreset: string | null;
+}
+
+export interface CreatePresetInput {
+  id: string;
+  title?: string;
+  template?: string;
+  from?: string;
+}
+
+export interface PromptPreview {
+  prompt: string;
+  preset: string | null;
+  files: { name: string; source: "preset" | "workspace" }[];
 }
 
 export class ApiError extends Error {
@@ -94,4 +138,15 @@ export const api = {
   dispatch: (input: DispatchInput) =>
     request<{ taskId: string }>("/api/tasks", { method: "POST", body: JSON.stringify(input) }),
   cancel: (id: string) => request<{ id: string; status: string }>(`/api/tasks/${id}/cancel`, { method: "POST" }),
+  presets: () => request<PresetsResponse>("/api/presets"),
+  preset: (id: string) => request<{ preset: Preset }>(`/api/presets/${id}`).then((r) => r.preset),
+  createPreset: (input: CreatePresetInput) =>
+    request<{ preset: Preset }>("/api/presets", { method: "POST", body: JSON.stringify(input) }).then((r) => r.preset),
+  savePreset: (id: string, input: { title: string; description: string; files: PresetFile[] }) =>
+    request<{ preset: Preset }>(`/api/presets/${id}`, { method: "PUT", body: JSON.stringify(input) }).then((r) => r.preset),
+  deletePreset: (id: string) => request<{ deleted: string }>(`/api/presets/${id}`, { method: "DELETE" }),
+  setDefaultPreset: (id: string, isDefault: boolean) =>
+    request<{ defaultPreset: string | null }>(`/api/presets/${id}/default`, { method: isDefault ? "POST" : "DELETE" }),
+  previewPrompt: (input: { role: string; workspace: string; prompt: string; preset: string | null }) =>
+    request<PromptPreview>("/api/prompt-preview", { method: "POST", body: JSON.stringify(input) }),
 };

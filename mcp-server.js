@@ -4,6 +4,7 @@ const readline = require('readline');
 const path = require('path');
 const fs = require('fs');
 const { getAgentCard, runAgyTask, cancelTask, activeTasks } = require('./dispatcher');
+const presets = require('./presets');
 
 const rl = readline.createInterface({
   input: process.stdin,
@@ -31,6 +32,10 @@ function formatUsage(usage) {
 
 function resultFooter(taskRecord) {
   const lines = [];
+  if (taskRecord.preset || (taskRecord.preferenceFiles && taskRecord.preferenceFiles.length)) {
+    const files = (taskRecord.preferenceFiles || []).map((file) => (file.source === 'workspace' ? `${file.name} (workspace)` : file.name));
+    lines.push(`Preset: ${taskRecord.preset || 'none'}${files.length ? ` (${files.join(', ')})` : ''}`);
+  }
   const verification = taskRecord.verification;
   if (verification) {
     const seconds = Math.round(verification.durationMs / 1000);
@@ -90,6 +95,10 @@ const TOOLS = [
         model: {
           type: 'string',
           description: 'Optional Antigravity model id (see `agy models`). Omit to use the default.'
+        },
+        preset: {
+          type: 'string',
+          description: 'User preference preset (coding style, frontend/API libraries, default technology choices) to include in the prompt. Omit to use the default preset; "none" for no preset. See a2a_list_presets. Files in <workspace>/.agy/preferences/ always apply.'
         },
         conversation_id: {
           type: 'string',
@@ -158,6 +167,14 @@ const TOOLS = [
   {
     name: 'a2a_list_expert_agents',
     description: 'List all available Senior Expert Software Developer personas and specialties from the Antigravity A2A Agent Card.',
+    inputSchema: {
+      type: 'object',
+      properties: {}
+    }
+  },
+  {
+    name: 'a2a_list_presets',
+    description: 'List the user preference presets (coding style, frontend and API libraries, default technology choices) that can be passed as "preset" to a2a_dispatch_to_antigravity, and which one is the default.',
     inputSchema: {
       type: 'object',
       properties: {}
@@ -253,6 +270,22 @@ rl.on('line', async (line) => {
         });
       }
 
+      if (toolName === 'a2a_list_presets') {
+        const list = presets.listPresets();
+        const lines = list.map((preset) => {
+          const files = preset.files.map((file) => (file.roles ? `${file.name} [${file.roles.join(', ')}]` : file.name)).join(', ');
+          return `- ${preset.id}${preset.isDefault ? ' (default)' : ''}: ${preset.title}${preset.description ? ` - ${preset.description}` : ''}\n  files: ${files || '(none)'}`;
+        });
+        return sendRpcResponse(id, {
+          content: [{
+            type: 'text',
+            text: list.length
+              ? `Presets (pass the id as "preset"; omit it to use the default):\n${lines.join('\n')}`
+              : 'No presets yet. Create one in the web panel (Presets) or with "agy-bridge presets new <id> --template <template>".'
+          }]
+        });
+      }
+
       if (toolName === 'a2a_get_task_status') {
         const task = activeTasks.get(args.task_id);
         if (!task) {
@@ -276,6 +309,7 @@ rl.on('line', async (line) => {
                 usage: task.usage || undefined,
                 verification: task.verification || undefined,
                 conversationId: task.conversationId || undefined,
+                preset: task.preset || undefined,
                 changes: task.changes || undefined,
                 outputPreview: task.output.slice(-2000),
                 totalLength: task.outputChars || task.output.length
@@ -381,6 +415,7 @@ rl.on('line', async (line) => {
           conversation_id,
           acceptance_criteria,
           verification_command,
+          preset,
           is_async = false
         } = args;
 
@@ -390,6 +425,15 @@ rl.on('line', async (line) => {
         if (badWorkspace) {
           return sendRpcResponse(id, {
             content: [{ type: 'text', text: '[A2A Dispatch Error]: ' + badWorkspace }],
+            isError: true
+          });
+        }
+
+        try {
+          presets.resolvePresetId(preset);
+        } catch (err) {
+          return sendRpcResponse(id, {
+            content: [{ type: 'text', text: '[A2A Dispatch Error]: ' + err.message }],
             isError: true
           });
         }
@@ -411,14 +455,15 @@ rl.on('line', async (line) => {
             model,
             conversation_id,
             acceptance_criteria,
-            verification_command
+            verification_command,
+            preset
           });
 
           return sendRpcResponse(id, {
             content: [
               {
                 type: 'text',
-                text: `[A2A Dispatch] Task started in background.\nTask ID: ${taskId}\nAssigned Role: ${taskRecord.role}\nWorkspace: ${effectiveWorkspace}\nUse 'a2a_get_task_status' with task_id="${taskId}" to monitor progress.`
+                text: `[A2A Dispatch] Task started in background.\nTask ID: ${taskId}\nAssigned Role: ${taskRecord.role}\nWorkspace: ${effectiveWorkspace}\nPreset: ${taskRecord.preset || 'none'}\nUse 'a2a_get_task_status' with task_id="${taskId}" to monitor progress.`
               }
             ]
           });
@@ -436,6 +481,7 @@ rl.on('line', async (line) => {
             conversation_id,
             acceptance_criteria,
             verification_command,
+            preset,
             onDone: (taskRecord) => {
               const summary = [
                 `==================================================`,

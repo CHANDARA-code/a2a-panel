@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, App as AntApp, Button, Descriptions, Drawer, Flex, Popconfirm, Skeleton, Switch, Typography, theme } from "antd";
-import { CopyOutlined, ReloadOutlined, StopOutlined } from "@ant-design/icons";
+import { Alert, App as AntApp, Button, Descriptions, Drawer, Flex, Popconfirm, Skeleton, Switch, Tag, Typography, theme } from "antd";
+import { CopyOutlined, FileMarkdownOutlined, ReloadOutlined, StopOutlined } from "@ant-design/icons";
 import { api } from "../api";
 import type { Task } from "../api";
 import { formatDateTime, formatDuration } from "../format";
@@ -102,6 +102,19 @@ export function TaskDrawer({ taskId, summary, isMobile, cancelling, onClose, onC
             items={[
               { key: "id", label: "Task ID", span: { xs: 1, md: 2 }, children: <Typography.Text copyable code>{task.id}</Typography.Text> },
               { key: "workspace", label: "Workspace", span: { xs: 1, md: 2 }, children: <Typography.Text copyable style={{ wordBreak: "break-all" }}>{task.workspace}</Typography.Text> },
+              {
+                key: "preset",
+                label: "Preset",
+                span: { xs: 1, md: 2 },
+                children: (
+                  <Flex gap={4} wrap align="center">
+                    <Typography.Text style={{ marginInlineEnd: 4 }}>{task.preset ?? "none"}</Typography.Text>
+                    {(task.preferences ?? []).map((file) => (
+                      <Tag key={file} icon={<FileMarkdownOutlined />} style={{ marginInlineEnd: 0 }}>{file}</Tag>
+                    ))}
+                  </Flex>
+                ),
+              },
               { key: "started", label: "Started", children: formatDateTime(task.startedAt) },
               { key: "finished", label: "Finished", children: formatDateTime(task.finishedAt) },
               { key: "duration", label: "Duration", children: formatDuration(task.durationMs) },

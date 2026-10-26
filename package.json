@@ -31,6 +31,7 @@
     "agent-card.json",
     "agent.json",
     "personas",
+    "preset-templates",
     "panel/dist",
     "LICENSE",
     "README.md"

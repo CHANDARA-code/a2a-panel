@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
-const { getAgentCard, runAgyTask, cancelTask, isTaskProcessLive, readUsageTotals, LOGS_DIR, TASK_ID_PATTERN } = require('./dispatcher');
+const { getAgentCard, buildTaskPrompt, runAgyTask, cancelTask, isTaskProcessLive, readUsageTotals, LOGS_DIR, TASK_ID_PATTERN } = require('./dispatcher');
+const presets = require('./presets');
 
 const BASE_PATH = '/dashboard';
 const DIST_DIR = path.join(__dirname, 'panel', 'dist');
@@ -154,6 +155,8 @@ function parseLog(id, headBytes = HEAD_BYTES) {
     id,
     role: grab(/^Role: (.*)$/m),
     workspace: grab(/^Workspace: (.*)$/m),
+    preset: ['', 'none'].includes(grab(/^Preset: (.*)$/m)) ? null : grab(/^Preset: (.*)$/m),
+    preferences: ['', 'none'].includes(grab(/^Preferences: (.*)$/m)) ? [] : grab(/^Preferences: (.*)$/m).split(', '),
     startedAt,
     finishedAt,
     updatedAt: new Date(stat.mtimeMs).toISOString(),
@@ -223,6 +226,7 @@ function validateDispatch(body) {
   if (!stat.isDirectory()) return 'Workspace is not a directory';
   if (body.mode !== undefined && !MODES.includes(body.mode)) return 'Unsupported mode';
   if (body.effort !== undefined && !EFFORTS.includes(body.effort)) return 'Unsupported effort';
+  if (body.preset !== undefined && body.preset !== null && typeof body.preset !== 'string') return 'preset must be a preset id, or null for none';
   return null;
 }
 
@@ -243,12 +247,88 @@ async function dispatch(req, res) {
       mode: body.mode || 'accept-edits',
       effort: body.effort || 'high',
       model: body.model,
-      conversation_id: body.conversation_id
+      conversation_id: body.conversation_id,
+      preset: body.preset
     });
     return sendJson(res, 202, { taskId, status: 'running' });
   } catch (err) {
     return sendJson(res, 400, { error: err.message });
   }
+}
+
+async function previewPrompt(req, res) {
+  let body;
+  try {
+    body = await readJson(req);
+  } catch (err) {
+    return sendJson(res, 400, { error: err.message });
+  }
+  if (typeof body.role !== 'string' || !listRoles().some((r) => r.id === body.role)) return sendJson(res, 400, { error: 'Unknown role' });
+  const workspace = typeof body.workspace === 'string' && path.isAbsolute(body.workspace) && fs.existsSync(body.workspace) ? body.workspace : null;
+  try {
+    const { finalPrompt, preferences } = buildTaskPrompt({
+      role: body.role,
+      prompt: typeof body.prompt === 'string' && body.prompt.trim() ? body.prompt : '(your task)',
+      workspace,
+      preset: body.preset
+    });
+    return sendJson(res, 200, {
+      prompt: finalPrompt,
+      preset: preferences.presetId,
+      files: preferences.files.map((file) => ({ name: file.name, source: file.source }))
+    });
+  } catch (err) {
+    return sendJson(res, err.code === 404 ? 404 : 400, { error: err.message });
+  }
+}
+
+// /api/presets[/:id[/default]]
+async function handlePresets(req, res, method, pathname) {
+  const match = pathname.match(/^\/api\/presets(?:\/([\w-]+)(?:\/(default))?)?$/);
+  if (!match) return false;
+  const [, id, action] = match;
+  const run = async (fn) => {
+    try {
+      await fn();
+    } catch (err) {
+      if (err instanceof presets.PresetError) return sendJson(res, err.code, { error: err.message });
+      return sendJson(res, err.message === 'Payload too large' || err.message === 'Invalid JSON' ? 400 : 500, { error: err.message });
+    }
+  };
+
+  if (!id && method === 'GET') {
+    await run(() => sendJson(res, 200, { presets: presets.listPresets(), templates: presets.listTemplates(), defaultPreset: presets.getDefaultPresetId() }));
+    return true;
+  }
+  if (!id && method === 'POST') {
+    await run(async () => sendJson(res, 201, { preset: presets.createPreset(await readJson(req)) }));
+    return true;
+  }
+  if (id && action === 'default' && (method === 'POST' || method === 'DELETE')) {
+    await run(() => {
+      if (method === 'POST') presets.setDefaultPresetId(id);
+      else if (presets.getDefaultPresetId() === id) presets.setDefaultPresetId(null);
+      sendJson(res, 200, { defaultPreset: presets.getDefaultPresetId() });
+    });
+    return true;
+  }
+  if (id && !action && method === 'GET') {
+    await run(() => sendJson(res, 200, { preset: presets.getPreset(id) }));
+    return true;
+  }
+  if (id && !action && method === 'PUT') {
+    await run(async () => sendJson(res, 200, { preset: presets.updatePreset(id, await readJson(req)) }));
+    return true;
+  }
+  if (id && !action && method === 'DELETE') {
+    await run(() => {
+      presets.deletePreset(id);
+      sendJson(res, 200, { deleted: id });
+    });
+    return true;
+  }
+  sendJson(res, 405, { error: 'Method not allowed' });
+  return true;
 }
 
 function serveTaskLog(res, id) {
@@ -336,6 +416,15 @@ async function handle(req, res, pathname, { token }) {
   if (method === 'POST' && pathname === '/api/tasks') {
     await dispatch(req, res);
     return true;
+  }
+
+  if (method === 'POST' && pathname === '/api/prompt-preview') {
+    await previewPrompt(req, res);
+    return true;
+  }
+
+  if (pathname === '/api/presets' || pathname.startsWith('/api/presets/')) {
+    if (await handlePresets(req, res, method, pathname)) return true;
   }
 
   const taskMatch = pathname.match(/^\/api\/tasks\/([\w-]+)(?:\/(log|cancel))?$/);

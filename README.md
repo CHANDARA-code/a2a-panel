@@ -9,6 +9,7 @@ Claude Code stays the team leader: it plans, splits the work and reviews the res
 - **Token usage**: real token counts from `agy`, per task and per role (`agy-bridge usage`).
 - **Safe process control**: cancel stops the whole process group; wall-clock and silence timeouts, a concurrency cap and bounded memory protect your machine.
 - **Sessions**: continue an Antigravity conversation by id instead of resending context.
+- **Presets**: your coding style, frontend and API libraries and default technology choices, kept as markdown files and sent to the specialists they apply to.
 - **Standard interfaces**: an MCP server for Claude Code, and an A2A-style HTTP / JSON-RPC server for other clients.
 
 ## Requirements
@@ -87,8 +88,9 @@ Tasks run `agy` with `--dangerously-skip-permissions`, because headless `agy` ca
 Claude Code automatically connects to the `agy-bridge` MCP server on startup once you have run `agy-bridge init`.
 It provides Claude Code with the following tools:
 
-- `a2a_dispatch_to_antigravity(role, task_description, workspace_path, mode, effort, model, conversation_id, acceptance_criteria, verification_command, is_async)`
+- `a2a_dispatch_to_antigravity(role, task_description, workspace_path, mode, effort, model, conversation_id, acceptance_criteria, verification_command, preset, is_async)`
 - `a2a_list_expert_agents()`
+- `a2a_list_presets()`
 - `a2a_get_task_status(task_id)`
 - `a2a_cancel_task(task_id)`
 - `a2a_validate_delivery(task_summary, acceptance_criteria, verification_command, workspace_path)`
@@ -120,6 +122,14 @@ agy-bridge server stop
 agy-bridge run web-engineer "Create a user avatar component"
 agy-bridge run test-engineer "Write unit tests for the auth service"
 agy-bridge run code-reviewer "Review the latest changes in git"
+agy-bridge run web-engineer "Add a settings page" --preset my-team
+
+# Manage preference presets (see "5. Presets")
+agy-bridge presets                      # list
+agy-bridge presets templates
+agy-bridge presets new my-team --template nestjs-react
+agy-bridge presets default my-team      # or: agy-bridge presets default none
+agy-bridge presets show my-team
 ```
 
 ---
@@ -130,7 +140,8 @@ When running `agy-bridge server start`:
 - **Agent Card**: `GET http://127.0.0.1:5188/.well-known/agent.json`
 - **Health Check**: `GET http://127.0.0.1:5188/health`
 - **List Roles**: `GET http://127.0.0.1:5188/roles`
-- **Dispatch Task**: `POST http://127.0.0.1:5188/tasks/send`
+- **Dispatch Task**: `POST http://127.0.0.1:5188/tasks/send`. Optional `preset` (a preset id, or `null` / `"none"` for none; omitted means the default preset). JSON-RPC `message/send` takes the same field.
+- **Presets** (panel API, token required for changes): `GET /api/presets`, `POST /api/presets` (`{id, template?, from?, title?}`), `GET|PUT|DELETE /api/presets/:id`, `POST|DELETE /api/presets/:id/default`, and `POST /api/prompt-preview` (`{role, workspace, prompt, preset}`) to see the exact prompt.
 - **Task Status**: `GET http://127.0.0.1:5188/tasks/:id`. Returns status, output, `usage`, `verification`, `conversationId`, `changes` and `workspace`, so an async caller gets the same facts as a synchronous one. JSON-RPC `tasks/get` returns the same fields.
 - **JSON-RPC 2.0**: `POST http://127.0.0.1:5188/rpc` with `message/send`, `tasks/get`, `tasks/list` and `tasks/cancel`. Streaming and push notifications are not implemented; the agent card says so.
 
@@ -141,7 +152,8 @@ When running `agy-bridge server start`:
 Open `http://127.0.0.1:5188/dashboard` (or run `agy-bridge dashboard`).
 
 - Monitor: stat cards, status filter, search, per-task detail with live log. Works on mobile.
-- Control: dispatch a task (specialist, workspace, prompt, plan/edit mode, effort), cancel a running task, run a task again.
+- Control: dispatch a task (specialist, workspace, prompt, preset, plan/edit mode, effort), preview the exact prompt, cancel a running task, run a task again.
+- Presets: create, edit and preview your preference files (see "5. Presets").
 - Built with React, Vite and Ant Design in `panel/`. Light and dark themes.
 - Tasks started from Claude Code (MCP) or the CLI show up too, because the panel reads the task logs and PID files in `logs/`.
 - The live log shows each tool the agent runs, with its main argument, for example `[tool] run_command: npm test` or `[tool] read_file: /path/to/file.ts`. A tool call that fails shows as `[error] <tool>: <args> (<reason>)`. If `agy` reports denied actions, the task output ends with `[A2A] Antigravity denied these actions: …`.
@@ -202,7 +214,80 @@ This walkthrough built an eMenu app (NestJS API + React web) in an empty git rep
 
 ![eMenu kitchen board](docs/screenshots/emenu-kitchen.png)
 
-## 5. Security model
+## 5. Presets
+
+A preset holds your preferences as a folder of markdown files, one topic per file: coding style, frontend stack, API stack, testing, default technology choices, and anything else you add. When a task starts, the bridge adds the files that apply to that specialist to its prompt, under `### USER PREFERENCES`, before the task itself.
+
+**Presets start empty.** Nothing is added to a prompt until you create a preset and either make it the default or pick it for a task.
+
+### Files and roles
+
+Each file can say which specialists it is for with a `roles` list in its frontmatter. A file without `roles` goes to every specialist. The `web-engineer` gets your frontend rules and not your ORM rules, so prompts stay short.
+
+```markdown
+---
+title: Frontend stack
+roles: [web-engineer, web-performance-auditor, code-reviewer, test-engineer]
+---
+- React 19 + TypeScript, built with Vite.
+- UI library: Ant Design 5. Do not add Tailwind or MUI.
+- Server state: TanStack Query.
+```
+
+In the panel you edit `roles` with a specialist picker; you don't need to write the frontmatter by hand.
+
+### Where presets live
+
+| Location | What it is |
+|---|---|
+| `presets/<id>/` in the data folder (`~/.agy-bridge/presets` for an npm install; the clone folder otherwise, git-ignored) | Your named presets: `preset.json` (title, description) and the `.md` files. Managed from the panel or the CLI. Override the folder with `A2A_PRESETS_DIR`. |
+| `<workspace>/.agy/preferences/*.md` | Optional, per repository, can be committed so the team shares it. A file here replaces the preset file with the same name, and it applies even when no preset is chosen. |
+| `preset-templates/` | Starter templates shipped with the bridge: `nestjs-react`, `nextjs-fullstack` and `flutter-mobile`. A new preset can copy one, then you edit it. |
+
+### Which preset a task uses
+
+- **Panel**: the Preset field in New task, pre-filled with the default. "Preview prompt" shows exactly what the agent will receive.
+- **Claude Code**: the `preset` argument of `a2a_dispatch_to_antigravity`; `a2a_list_presets` lists them.
+- **CLI**: `--preset <id>`. **HTTP / JSON-RPC**: the `preset` field.
+- If no preset is given, the default preset is used. Use `none` (or `null` in JSON) to send no preset. An unknown preset id is refused.
+
+The preset and the files a task received appear in the task list, the task detail and the log header (`Preset:` and `Preferences:` lines). A task's MCP result ends with them too. The preference section is capped at 16,000 characters, and each file at 20,000.
+
+### Screenshots
+
+**Presets start empty.**
+
+![Presets page with no presets](docs/screenshots/09-presets-empty.png)
+
+**New preset from a template.** Start from a template, copy another preset, or start empty.
+
+![New preset dialog](docs/screenshots/10-new-preset.png)
+
+**Editor.** One tab per markdown file. Set the file name and the specialists it applies to, then edit the markdown. Set a preset as the default, delete it, or discard your changes.
+
+![Preset editor](docs/screenshots/11-preset-editor.png)
+
+**Markdown preview.**
+
+![Preset markdown preview](docs/screenshots/12-preset-preview.png)
+
+**Picking a preset for a task.** The default preset is pre-selected.
+
+![New task with a preset](docs/screenshots/13-new-task-preset.png)
+
+**Prompt preview.** Shows exactly what the specialist receives, with the files that apply to it. For the `web-engineer` this preset leaves out `api.md`.
+
+![Prompt preview](docs/screenshots/14-prompt-preview.png)
+
+**The task records its preset.** Asked which libraries it was told to use, the agent answered Ant Design 5 and TanStack Query (from `frontend.md`), and Jest, supertest, Vitest and React Testing Library (from `testing.md`).
+
+![Task detail with its preset](docs/screenshots/15-task-with-preset.png)
+
+**Mobile.**
+
+<img src="docs/screenshots/16-presets-mobile.png" alt="Preset editor on mobile" width="320">
+
+## 6. Security model
 
 - The server only answers requests whose `Host` header is `127.0.0.1`, `localhost` or `[::1]` on the server port (blocks DNS rebinding).
 - No CORS headers are sent.
@@ -212,7 +297,7 @@ This walkthrough built an eMenu app (NestJS API + React web) in an empty git rep
 - Cancel stops the whole agent process group (SIGTERM, then SIGKILL after 5 seconds). Tasks started before this version run without their own process group, so cancel stops the agent and its descendants by walking the process tree.
 - Panel dispatch defaults to "Plan only". "Edit files" lets the agent edit files and run commands in the chosen workspace.
 
-## 6. Limits
+## 7. Limits
 
 Set these environment variables for the server, the MCP server and the CLI. `0` turns a limit off.
 
@@ -228,7 +313,7 @@ Set these environment variables for the server, the MCP server and the CLI. `0` 
 
 A stopped task shows `failed` with the reason (`Timed out after …` or `No output for …`).
 
-## 7. Usage tracking and sessions
+## 8. Usage tracking and sessions
 
 Tasks run with `--output-format stream-json`. The bridge turns the event stream into readable text, and records the token usage `agy` reports.
 
@@ -237,7 +322,7 @@ Tasks run with `--output-format stream-json`. The bridge turns the event stream 
 - Pass `conversation_id` (from an earlier result) to continue that Antigravity conversation instead of resending context. Pass `model` to pick a model from `agy models`.
 - A run whose final status from `agy` is not `SUCCESS` is marked failed.
 
-## 8. Verification gate
+## 9. Verification gate
 
 If a task has a `verification_command` (MCP tool, `/tasks/send`, or JSON-RPC `message/send`), the agent is told to run it, and then **the bridge runs it again itself** in the workspace once the agent has finished successfully.
 
@@ -249,7 +334,7 @@ If a task has a `verification_command` (MCP tool, `/tasks/send`, or JSON-RPC `me
 
 A passing command only proves what that command checks. If the agent also wrote the tests, a green run says little, so review the diff too.
 
-## 9. Tests
+## 10. Tests
 
 ```bash
 node --test test/server.test.js

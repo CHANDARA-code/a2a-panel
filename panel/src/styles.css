@@ -24,6 +24,37 @@ body {
   font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
+.preset-editor textarea,
+textarea.preset-editor {
+  font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.markdown-preview {
+  padding: 4px 16px;
+  overflow-x: auto;
+  min-height: 200px;
+}
+
+.markdown-preview table {
+  border-collapse: collapse;
+  margin: 12px 0;
+}
+
+.markdown-preview th,
+.markdown-preview td {
+  border: 1px solid currentColor;
+  border-color: rgba(127, 127, 127, 0.35);
+  padding: 4px 10px;
+  text-align: left;
+}
+
+.markdown-preview code {
+  font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: rgba(127, 127, 127, 0.15);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
 .ant-segmented {
   white-space: nowrap;
 }
