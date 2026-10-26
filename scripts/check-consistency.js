@@ -68,6 +68,16 @@ if (!enumMatch) {
   }
 }
 
+if (pkg && pkg.version) {
+  let changelog = '';
+  try {
+    changelog = read('CHANGELOG.md');
+  } catch (err) {
+    fail('CHANGELOG.md is missing');
+  }
+  if (changelog && !changelog.includes(`## [${pkg.version}]`)) fail(`CHANGELOG.md has no "## [${pkg.version}]" entry for the version in package.json`);
+}
+
 let readme = '';
 try {
   readme = read('README.md');

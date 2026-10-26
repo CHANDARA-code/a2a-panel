@@ -1,6 +1,6 @@
 {
   "name": "a2a-panel",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Delegate coding work from Claude Code to a team of Google Antigravity (agy) specialists, with a web panel, token usage tracking and safe process control.",
   "author": "leavchandara",
   "repository": {
@@ -34,6 +34,7 @@
     "preset-templates",
     "panel/dist",
     "LICENSE",
+    "CHANGELOG.md",
     "README.md"
   ],
   "keywords": [

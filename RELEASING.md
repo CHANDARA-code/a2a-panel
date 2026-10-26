@@ -5,8 +5,10 @@ Releases are cut by pushing a version tag. The pipeline in `.github/workflows/re
 ## Cut a release
 
 1. Make sure `main` is green in CI.
-2. Set the new version in `package.json` (for example `0.2.0`, or `0.2.0-rc.1` for a pre-release) and commit it.
-3. Tag and push:
+2. Set the new version in `package.json` (for example `0.2.0`, or `0.2.0-rc.1` for a pre-release), for example with `npm version 0.2.0 --no-git-tag-version`.
+3. In `CHANGELOG.md`, move the items under `[Unreleased]` into a new `## [0.2.0] - YYYY-MM-DD` section, and update the links at the bottom. `npm run check` fails if the version has no entry. The GitHub Release uses that entry as its notes.
+4. Commit both files.
+5. Tag and push:
 
    ```bash
    git tag v0.2.0

@@ -59,7 +59,17 @@ jobs:
         run: |
           flags=""
           if [ "${PRERELEASE}" = "true" ]; then flags="--prerelease"; fi
-          gh release create "${GITHUB_REF_NAME}" ./*.tgz --verify-tag --generate-notes --title "${GITHUB_REF_NAME}" ${flags}
+          # Release notes are the CHANGELOG.md entry for this version.
+          node -e '
+            const version = process.argv[1];
+            const text = require("fs").readFileSync("CHANGELOG.md", "utf8");
+            const start = text.indexOf(`## [${version}]`);
+            if (start === -1) process.exit(1);
+            const rest = text.slice(text.indexOf("\n", start) + 1);
+            const end = rest.search(/^## \[|^\[[^\]]+\]: /m);
+            process.stdout.write((end === -1 ? rest : rest.slice(0, end)).trim() + "\n");
+          ' "${GITHUB_REF_NAME#v}" > notes.md
+          gh release create "${GITHUB_REF_NAME}" ./*.tgz --verify-tag --notes-file notes.md --title "${GITHUB_REF_NAME}" ${flags}
 
   npm-publish:
     needs: [build, github-release]
