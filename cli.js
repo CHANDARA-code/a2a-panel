@@ -7,12 +7,12 @@ const { spawn } = require('child_process');
 const { DATA_DIR } = require('./config');
 const { getAgentCard, runAgyTask, cancelTask, activeTasks, readUsageTotals } = require('./dispatcher');
 const presets = require('./presets');
+const autostart = require('./autostart');
 
 const PORT = parseInt(process.env.A2A_PORT || '5188', 10);
 const HOST = process.env.A2A_HOST || '127.0.0.1';
 const PID_FILE = path.join(DATA_DIR, 'server.pid');
 const OPEN_COMMAND = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open';
-const LAUNCH_AGENT_PLIST = process.platform === 'darwin' ? path.join(process.env.HOME || '', 'Library/LaunchAgents/com.antigravity.a2a-server.plist') : null;
 
 function showHelp() {
   console.log(`
@@ -40,6 +40,9 @@ Usage:
   a2a-panel server stop               Stop background A2A daemon
   a2a-panel server restart            Restart A2A daemon
   a2a-panel server run                Run A2A server in foreground
+  a2a-panel autostart [status]        Show whether the server starts at login
+  a2a-panel autostart enable          Start the server (and dashboard) at login, and now
+  a2a-panel autostart disable         Stop starting the server at login
   a2a-panel mcp                       Run A2A MCP server for Claude Code (stdio)
 
 Options for "a2a-panel run":
@@ -100,14 +103,21 @@ async function handleStatus() {
     console.log(`Agent Card:  http://${HOST}:${PORT}/.well-known/agent-card.json`);
     console.log(`JSON-RPC:    http://${HOST}:${PORT}/rpc`);
     console.log(`Active Tasks: ${s.data.activeTaskCount || 0}`);
+    console.log(`Dashboard:   http://${HOST}:${PORT}/dashboard`);
   } else {
     console.log(`Status:      \x1b[33mOFFLINE (Background daemon not running)\x1b[0m`);
     console.log(`(Note: Claude Code MCP connects directly via stdio without needing the HTTP daemon.)`);
   }
+  const atLogin = autostart.status();
+  console.log(`At login:    ${atLogin.installed ? 'starts automatically' : 'off (run "a2a-panel autostart enable")'}`);
 }
 
 async function handleServer(subcmd) {
-  const plistPath = LAUNCH_AGENT_PLIST && fs.existsSync(LAUNCH_AGENT_PLIST) ? LAUNCH_AGENT_PLIST : null;
+  const managed = autostart.isInstalled();
+  const report = (result, done) => {
+    if (result.ok) console.log(`\x1b[32m[✓] ${done}\x1b[0m`);
+    else console.error(`[A2A] ${result.output}`);
+  };
 
   if (subcmd === 'run') {
     require('./server').startServer();
@@ -115,11 +125,9 @@ async function handleServer(subcmd) {
   }
 
   if (subcmd === 'start') {
-    if (plistPath) {
-      spawn('launchctl', ['load', plistPath]);
-      console.log(`\x1b[32m[✓] A2A LaunchAgent service started via launchctl\x1b[0m`);
-      console.log(`    Listening on: http://${HOST}:${PORT}`);
-      console.log(`    Agent Card:   http://${HOST}:${PORT}/.well-known/agent-card.json`);
+    if (managed) {
+      report(autostart.start(), `A2A server started by the login service (${autostart.LABEL})`);
+      console.log(`    Dashboard: http://${HOST}:${PORT}/dashboard`);
       return;
     }
     const s = await checkServerOnline();
@@ -143,9 +151,9 @@ async function handleServer(subcmd) {
   }
 
   if (subcmd === 'stop') {
-    if (plistPath) {
-      spawn('launchctl', ['unload', plistPath]);
-      console.log(`\x1b[32m[✓] Stopped A2A LaunchAgent service via launchctl\x1b[0m`);
+    if (managed) {
+      report(autostart.stop(), 'Stopped the A2A server');
+      console.log('    It starts again at your next login. Run "a2a-panel autostart disable" to turn that off.');
       return;
     }
     if (fs.existsSync(PID_FILE)) {
@@ -164,12 +172,8 @@ async function handleServer(subcmd) {
   }
 
   if (subcmd === 'restart') {
-    if (plistPath) {
-      spawn('launchctl', ['unload', plistPath]);
-      setTimeout(() => {
-        spawn('launchctl', ['load', plistPath]);
-        console.log(`\x1b[32m[✓] A2A LaunchAgent service restarted\x1b[0m`);
-      }, 500);
+    if (managed) {
+      report(autostart.restart(), 'A2A server restarted by the login service');
       return;
     }
     await handleServer('stop');
@@ -179,6 +183,57 @@ async function handleServer(subcmd) {
   }
 
   console.log('Unknown server command. Use "a2a-panel server [start|stop|restart|run]"');
+}
+
+async function stopManualServer() {
+  if (!fs.existsSync(PID_FILE)) return;
+  await handleServer('stop');
+  await new Promise((resolve) => setTimeout(resolve, 500));
+}
+
+async function handleAutostart(args) {
+  const sub = args[0] || 'status';
+  try {
+    if (sub === 'status') {
+      const state = autostart.status();
+      console.log(`Start at login: ${state.installed ? '\x1b[32mon\x1b[0m' : 'off'}${state.installed ? ` (${state.detail}${state.pid ? `, PID ${state.pid}` : ''})` : ''}`);
+      if (state.installed) {
+        console.log(`Service file:   ${autostart.servicePath()}`);
+        console.log(`Logs:           ${autostart.logFiles().out}`);
+      }
+      else console.log('Run "a2a-panel autostart enable" to start the server and dashboard at login.');
+      if (state.installed && autostart.lingerEnabled() === false) {
+        console.log('Note: it starts when you log in. To start it at boot without logging in, run: sudo loginctl enable-linger $USER');
+      }
+      return;
+    }
+    if (sub === 'enable') {
+      if (args.includes('--dry-run')) {
+        const { file, content } = autostart.enable({ dryRun: true });
+        console.log(`# ${file}\n${content}`);
+        return;
+      }
+      if (!autostart.isInstalled()) await stopManualServer();
+      const { file } = autostart.enable();
+      console.log(`\x1b[32m[✓] The A2A server now starts at login.\x1b[0m`);
+      console.log(`    Service file: ${file}`);
+      console.log(`    Dashboard:    http://${HOST}:${PORT}/dashboard`);
+      console.log(`    Logs:         ${autostart.logFiles().out} and server.err`);
+      console.log('    Your current PATH was saved in the service. Run "a2a-panel autostart enable" again after you move agy, Node.js or this folder.');
+      if (autostart.lingerEnabled() === false) {
+        console.log('    It starts when you log in. To start it at boot without logging in, run: sudo loginctl enable-linger $USER');
+      }
+      return;
+    }
+    if (sub === 'disable') {
+      console.log(autostart.disable() ? '\x1b[32m[✓] The A2A server no longer starts at login, and it was stopped.\x1b[0m' : 'Start at login was not enabled.');
+      return;
+    }
+    throw new Error(`Unknown autostart command "${sub}". Use status, enable or disable.`);
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
+    process.exit(1);
+  }
 }
 
 async function handleRun(args) {
@@ -540,6 +595,11 @@ async function main() {
 
   if (cmd === 'mcp') {
     require('./mcp-server');
+    return;
+  }
+
+  if (cmd === 'autostart') {
+    await handleAutostart(args.slice(1));
     return;
   }
 

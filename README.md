@@ -27,9 +27,10 @@ cd a2a-panel
 npm run build:panel     # builds the web panel (optional, needed for the dashboard)
 node cli.js doctor      # checks Node, agy, sign-in, git and Claude Code
 node cli.js init        # registers the MCP server with Claude Code
+node cli.js autostart enable   # optional: start the server and dashboard at login (see below)
 ```
 
-With npm: `npm install -g a2a-panel`, then `a2a-panel doctor` and `a2a-panel init`. Restart Claude Code (or run `/mcp`) afterwards. In the examples below `a2a-panel` stands for `node cli.js` if you installed from a clone.
+With npm: `npm install -g a2a-panel`, then `a2a-panel doctor` and `a2a-panel init`. Restart Claude Code (or run `/mcp`) afterwards. In the examples below `a2a-panel` stands for `node cli.js` if you installed from a clone. To remove it again, see [11. Uninstall](#11-uninstall).
 
 **Coming from `agy-bridge`?** This project used to be called `agy-bridge`. Run `a2a-panel init` (or `node cli.js init`) once: it removes the old `agy-bridge` MCP registration from Claude Code and registers `a2a-panel`. An npm install keeps using an existing `~/.agy-bridge` data folder, so your task history and presets stay. The short `a2a` command still works.
 
@@ -120,6 +121,11 @@ a2a-panel dashboard
 a2a-panel server start
 a2a-panel server stop
 
+# Start the daemon and dashboard automatically at login (macOS and Linux)
+a2a-panel autostart enable
+a2a-panel autostart            # status
+a2a-panel autostart disable
+
 # Dispatch a task directly from terminal
 a2a-panel run web-engineer "Create a user avatar component"
 a2a-panel run test-engineer "Write unit tests for the auth service"
@@ -159,6 +165,40 @@ Open `http://127.0.0.1:5188/dashboard` (or run `a2a-panel dashboard`).
 - Built with React, Vite and Ant Design in `panel/`. Light and dark themes.
 - Tasks started from Claude Code (MCP) or the CLI show up too, because the panel reads the task logs and PID files in `logs/`.
 - The live log shows each tool the agent runs, with its main argument, for example `[tool] run_command: npm test` or `[tool] read_file: /path/to/file.ts`. A tool call that fails shows as `[error] <tool>: <args> (<reason>)`. If `agy` reports denied actions, the task output ends with `[A2A] Antigravity denied these actions: …`.
+
+### Keep the panel running after a restart
+
+By default the server runs until you stop it or restart your computer. To have the dashboard at `http://127.0.0.1:5188/dashboard` every time you log in, turn on start at login:
+
+```bash
+a2a-panel autostart enable
+```
+
+This installs a per-user service and starts the server right away. It needs no `sudo`.
+
+| | macOS | Linux |
+|---|---|---|
+| Service | LaunchAgent `~/Library/LaunchAgents/com.a2a-panel.server.plist` | systemd user service `~/.config/systemd/user/a2a-panel.service` |
+| Starts | when you log in | when you log in, or at boot after `sudo loginctl enable-linger $USER` |
+| Logs | `~/Library/Logs/a2a-panel/server.log` and `server.err` (also in Console.app) | `server.log` and `server.err` in the data folder |
+| If it crashes | restarted automatically (after up to 30 seconds) | restarted automatically after 30 seconds |
+
+Check it and control it:
+
+```bash
+a2a-panel autostart            # on/off, running or not, PID, service file, log file
+a2a-panel status               # server status, including "At login"
+a2a-panel server restart       # with start at login on, these control the service
+a2a-panel server stop          # stops it until your next login
+a2a-panel autostart disable    # stop it and stop starting it at login
+```
+
+Things to know:
+
+- **Saved environment.** A login service doesn't get your shell's `PATH`. `enable` saves your current `PATH`, plus any `A2A_*` and `AGY_BIN` variables, so the server can find `agy` and the tools a task runs (Node.js, git, npm). Run `a2a-panel autostart enable` again after you change any of these, switch Node.js versions (for example with nvm), or move the project folder. To see the file it would write without installing anything, run `a2a-panel autostart enable --dry-run`.
+- **macOS "Background Items Added".** macOS shows this notification the first time, listed under "node". If the server doesn't start, open **System Settings → General → Login Items & Extensions** and make sure **node** is allowed under **Allow in the Background**. Then run `a2a-panel server restart`.
+- **One server at a time.** `enable` stops a server you started earlier with `a2a-panel server start`, so the two don't compete for port 5188.
+- **Claude Code doesn't need it.** The MCP integration runs tasks over stdio. Start at login is only for the web panel and the HTTP / JSON-RPC API.
 
 Rebuild after changing the UI:
 
@@ -343,3 +383,48 @@ node --test test/server.test.js
 ```
 
 The tests start a server on a random port with a fake agent binary, a temporary logs directory and a temporary token, so they use no agent quota and leave no history behind.
+
+## 11. Uninstall
+
+Run the steps in this order: the first ones use the `a2a-panel` command, which the later ones remove.
+
+**1. Stop the server and turn off start at login.**
+
+```bash
+a2a-panel autostart disable    # removes the LaunchAgent / systemd user service and stops it
+a2a-panel server stop          # stops a server you started by hand, if one is running
+```
+
+**2. Remove it from Claude Code.**
+
+```bash
+claude mcp remove a2a-panel
+claude mcp remove agy-bridge   # only if you used the old name
+```
+
+Restart Claude Code (or run `/mcp`) so the `a2a_*` tools disappear.
+
+**3. Remove the program.**
+
+```bash
+npm uninstall -g a2a-panel     # if you installed it from npm
+npm unlink -g a2a-panel        # if you ran "npm link" in a clone
+rm -rf ~/path/to/a2a-panel     # if you cloned it: delete the clone folder (this also deletes its data)
+```
+
+**4. Delete your data (optional).** This is your task history, token usage, presets and the access token. Keep it if you might reinstall.
+
+| Installed from | Data folder |
+|---|---|
+| npm | `~/.a2a-panel` (or `~/.agy-bridge` if you used the old name) |
+| A clone | the clone folder itself: `logs/`, `presets/`, `token`, `server.log`, `server.err` (removed with the folder in step 3) |
+| `A2A_HOME` set | the folder it points to |
+
+```bash
+rm -rf ~/.a2a-panel ~/.agy-bridge     # npm install data
+rm -rf ~/Library/Logs/a2a-panel        # macOS start-at-login logs
+```
+
+**5. Project files (optional).** If you added `.agy/preferences/` to a repository, those files belong to that repository. Delete them there if you no longer want them.
+
+Nothing else is installed. `a2a-panel` doesn't change the Antigravity CLI (`agy`), its sign-in, or your Claude Code settings beyond the MCP registration removed in step 2.

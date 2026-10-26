@@ -724,3 +724,23 @@ test('an unknown preset is refused by every dispatch endpoint, and the prompt pr
   assert.ok(preview.body.files.some((f) => f.name === 'api.md'));
   assert.match(preview.body.prompt, /### TASK\nAdd orders$/);
 });
+
+test('autostart enable --dry-run prints the login service without installing it', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'a2a-home-'));
+  const out = execFileSync(process.execPath, [path.join(ROOT, 'cli.js'), 'autostart', 'enable', '--dry-run'], {
+    encoding: 'utf-8',
+    env: { ...process.env, HOME: home, XDG_CONFIG_HOME: path.join(home, '.config'), A2A_PORT: '5999', PATH: `/usr/bin:/bin:/usr/bin` }
+  });
+  assert.ok(out.includes(path.join(ROOT, 'server.js')));
+  assert.ok(out.includes('A2A_PORT'));
+  if (process.platform === 'darwin') {
+    assert.match(out, /com\.a2a-panel\.server\.plist/);
+    assert.match(out, /<key>RunAtLoad<\/key>\s*<true\/>/);
+    assert.match(out, /<string>\/usr\/bin:\/bin<\/string>/);
+  } else {
+    assert.match(out, /a2a-panel\.service/);
+    assert.match(out, /WantedBy=default\.target/);
+    assert.match(out, /Environment="PATH=\/usr\/bin:\/bin"/);
+  }
+  assert.deepStrictEqual(fs.readdirSync(home), []);
+});
