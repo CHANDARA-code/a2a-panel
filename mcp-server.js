@@ -231,7 +231,7 @@ rl.on('line', async (line) => {
         tools: {}
       },
       serverInfo: {
-        name: 'a2a-antigravity',
+        name: 'a2a-panel',
         version: '1.0.0'
       }
     });
@@ -281,7 +281,7 @@ rl.on('line', async (line) => {
             type: 'text',
             text: list.length
               ? `Presets (pass the id as "preset"; omit it to use the default):\n${lines.join('\n')}`
-              : 'No presets yet. Create one in the web panel (Presets) or with "agy-bridge presets new <id> --template <template>".'
+              : 'No presets yet. Create one in the web panel (Presets) or with "a2a-panel presets new <id> --template <template>".'
           }]
         });
       }

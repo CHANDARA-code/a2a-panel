@@ -1,4 +1,4 @@
-# agy-bridge
+# a2a-panel
 
 Delegate coding work from **Claude Code** to a team of **Google Antigravity** (`agy`) specialists, and watch and control it from a web panel.
 
@@ -6,7 +6,7 @@ Claude Code stays the team leader: it plans, splits the work and reviews the res
 
 - **12 specialist roles** that follow the software lifecycle: `solution-architect` (requirements and design), `web-engineer`, `api-engineer`, `mobile-engineer`, `desktop-engineer`, `lead-software-engineer`, `test-engineer`, `bug-triager`, `code-reviewer`, `security-auditor`, `web-performance-auditor`, `devops-engineer`.
 - **Web panel**: live logs, dispatch, cancel and re-run from the browser, with light and dark themes.
-- **Token usage**: real token counts from `agy`, per task and per role (`agy-bridge usage`).
+- **Token usage**: real token counts from `agy`, per task and per role (`a2a-panel usage`).
 - **Safe process control**: cancel stops the whole process group; wall-clock and silence timeouts, a concurrency cap and bounded memory protect your machine.
 - **Sessions**: continue an Antigravity conversation by id instead of resending context.
 - **Presets**: your coding style, frontend and API libraries and default technology choices, kept as markdown files and sent to the specialists they apply to.
@@ -22,14 +22,16 @@ Claude Code stays the team leader: it plans, splits the work and reviews the res
 ## Install
 
 ```bash
-git clone https://github.com/CHANDARA-code/agy-bridge.git agy-bridge
-cd agy-bridge
+git clone https://github.com/CHANDARA-code/a2a-panel.git a2a-panel
+cd a2a-panel
 npm run build:panel     # builds the web panel (optional, needed for the dashboard)
 node cli.js doctor      # checks Node, agy, sign-in, git and Claude Code
 node cli.js init        # registers the MCP server with Claude Code
 ```
 
-With npm: `npm install -g agy-bridge`, then `agy-bridge doctor` and `agy-bridge init`. Restart Claude Code (or run `/mcp`) afterwards. In the examples below `agy-bridge` stands for `node cli.js` if you installed from a clone.
+With npm: `npm install -g a2a-panel`, then `a2a-panel doctor` and `a2a-panel init`. Restart Claude Code (or run `/mcp`) afterwards. In the examples below `a2a-panel` stands for `node cli.js` if you installed from a clone.
+
+**Coming from `agy-bridge`?** This project used to be called `agy-bridge`. Run `a2a-panel init` (or `node cli.js init`) once: it removes the old `agy-bridge` MCP registration from Claude Code and registers `a2a-panel`. An npm install keeps using an existing `~/.agy-bridge` data folder, so your task history and presets stay. The short `a2a` command still works.
 
 ## Safety
 
@@ -85,7 +87,7 @@ Tasks run `agy` with `--dangerously-skip-permissions`, because headless `agy` ca
 
 ## 1. Native Claude Code Integration
 
-Claude Code automatically connects to the `agy-bridge` MCP server on startup once you have run `agy-bridge init`.
+Claude Code automatically connects to the `a2a-panel` MCP server on startup once you have run `a2a-panel init`.
 It provides Claude Code with the following tools:
 
 - `a2a_dispatch_to_antigravity(role, task_description, workspace_path, mode, effort, model, conversation_id, acceptance_criteria, verification_command, preset, is_async)`
@@ -102,41 +104,41 @@ It provides Claude Code with the following tools:
 
 ## 2. Command line
 
-The package installs the `agy-bridge` command (also available as `a2a`):
+The package installs the `a2a-panel` command (also available as `a2a`):
 
 ```bash
 # List available Antigravity developer roles & specialties
-agy-bridge list
+a2a-panel list
 
 # Check A2A server status & agent readiness
-agy-bridge status
+a2a-panel status
 
 # Open the web task panel (monitor, dispatch, cancel)
-agy-bridge dashboard
+a2a-panel dashboard
 
 # Start / Stop the HTTP & JSON-RPC daemon (listening on port 5188)
-agy-bridge server start
-agy-bridge server stop
+a2a-panel server start
+a2a-panel server stop
 
 # Dispatch a task directly from terminal
-agy-bridge run web-engineer "Create a user avatar component"
-agy-bridge run test-engineer "Write unit tests for the auth service"
-agy-bridge run code-reviewer "Review the latest changes in git"
-agy-bridge run web-engineer "Add a settings page" --preset my-team
+a2a-panel run web-engineer "Create a user avatar component"
+a2a-panel run test-engineer "Write unit tests for the auth service"
+a2a-panel run code-reviewer "Review the latest changes in git"
+a2a-panel run web-engineer "Add a settings page" --preset my-team
 
 # Manage preference presets (see "5. Presets")
-agy-bridge presets                      # list
-agy-bridge presets templates
-agy-bridge presets new my-team --template nestjs-react
-agy-bridge presets default my-team      # or: agy-bridge presets default none
-agy-bridge presets show my-team
+a2a-panel presets                      # list
+a2a-panel presets templates
+a2a-panel presets new my-team --template nestjs-react
+a2a-panel presets default my-team      # or: a2a-panel presets default none
+a2a-panel presets show my-team
 ```
 
 ---
 
 ## 3. A2A HTTP & JSON-RPC Endpoints
 
-When running `agy-bridge server start`:
+When running `a2a-panel server start`:
 - **Agent Card**: `GET http://127.0.0.1:5188/.well-known/agent.json`
 - **Health Check**: `GET http://127.0.0.1:5188/health`
 - **List Roles**: `GET http://127.0.0.1:5188/roles`
@@ -149,7 +151,7 @@ When running `agy-bridge server start`:
 
 ## 4. Web Task Panel
 
-Open `http://127.0.0.1:5188/dashboard` (or run `agy-bridge dashboard`).
+Open `http://127.0.0.1:5188/dashboard` (or run `a2a-panel dashboard`).
 
 - Monitor: stat cards, status filter, search, per-task detail with live log. Works on mobile.
 - Control: dispatch a task (specialist, workspace, prompt, preset, plan/edit mode, effort), preview the exact prompt, cancel a running task, run a task again.
@@ -162,7 +164,7 @@ Rebuild after changing the UI:
 
 ```bash
 cd panel
-npm install     # first time only
+npm ci          # first time only (installs exactly what package-lock.json lists)
 npm run build   # type-checks, then writes panel/dist
 ```
 
@@ -240,7 +242,7 @@ In the panel you edit `roles` with a specialist picker; you don't need to write 
 
 | Location | What it is |
 |---|---|
-| `presets/<id>/` in the data folder (`~/.agy-bridge/presets` for an npm install; the clone folder otherwise, git-ignored) | Your named presets: `preset.json` (title, description) and the `.md` files. Managed from the panel or the CLI. Override the folder with `A2A_PRESETS_DIR`. |
+| `presets/<id>/` in the data folder (`~/.a2a-panel/presets` for an npm install; the clone folder otherwise, git-ignored) | Your named presets: `preset.json` (title, description) and the `.md` files. Managed from the panel or the CLI. Override the folder with `A2A_PRESETS_DIR`. |
 | `<workspace>/.agy/preferences/*.md` | Optional, per repository, can be committed so the team shares it. A file here replaces the preset file with the same name, and it applies even when no preset is chosen. |
 | `preset-templates/` | Starter templates shipped with the bridge: `nestjs-react`, `nextjs-fullstack` and `flutter-mobile`. A new preset can copy one, then you edit it. |
 
@@ -317,7 +319,7 @@ A stopped task shows `failed` with the reason (`Timed out after …` or `No outp
 
 Tasks run with `--output-format stream-json`. The bridge turns the event stream into readable text, and records the token usage `agy` reports.
 
-- `agy-bridge usage` shows totals and a per-role breakdown, read from `logs/usage.jsonl`. The same data is at `GET /api/usage`.
+- `a2a-panel usage` shows totals and a per-role breakdown, read from `logs/usage.jsonl`. The same data is at `GET /api/usage`.
 - Each synchronous MCP result ends with the task's token usage, its conversation id, and `git status` / `git diff --stat` of the workspace, so you can check the work without reading the agent's account.
 - Pass `conversation_id` (from an earlier result) to continue that Antigravity conversation instead of resending context. Pass `model` to pick a model from `agy models`.
 - A run whose final status from `agy` is not `SUCCESS` is marked failed.

@@ -3,8 +3,8 @@
 ## Setup
 
 ```bash
-git clone https://github.com/CHANDARA-code/agy-bridge.git agy-bridge
-cd agy-bridge
+git clone https://github.com/CHANDARA-code/a2a-panel.git a2a-panel
+cd a2a-panel
 npm test
 npm run build:panel
 ```

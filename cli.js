@@ -17,32 +17,32 @@ const LAUNCH_AGENT_PLIST = process.platform === 'darwin' ? path.join(process.env
 function showHelp() {
   console.log(`
 ========================================================================
-  AGY-BRIDGE: Claude Code (Team Leader) <-> Antigravity (Senior Devs)
+  A2A-PANEL: Claude Code (Team Leader) <-> Antigravity (Senior Devs)
 ========================================================================
 
 Usage:
-  agy-bridge list                      List all Antigravity expert dev personas & specialties
-  agy-bridge status                    Show A2A server health & agent status
-  agy-bridge tasks                     List all running & recent tasks (alias: ps)
-  agy-bridge doctor                    Check Node, agy, sign-in, git, data folder and Claude Code setup
-  agy-bridge init [--dry-run]          Register this bridge as an MCP server in Claude Code
-  agy-bridge usage                     Show Antigravity token usage totals (tokens kept off Claude's bill)
-  agy-bridge logs [taskId] [-f]        View or stream live logs of a task (or latest task)
-  agy-bridge dashboard [--no-open]     Open the web task panel (monitor, dispatch, cancel)
-  agy-bridge run <role> "<task prompt>"  Dispatch task to an Antigravity developer
-  agy-bridge presets [list]            List preference presets (coding style, libraries, tech defaults)
-  agy-bridge presets show <id>         Print a preset's markdown files
-  agy-bridge presets templates         List the starter templates presets can be created from
-  agy-bridge presets new <id> [--template <t> | --from <preset>]   Create a preset
-  agy-bridge presets default <id|none> Set or clear the preset used when none is given
-  agy-bridge presets delete <id>       Delete a preset
-  agy-bridge server start              Start A2A protocol HTTP & JSON-RPC daemon in background
-  agy-bridge server stop               Stop background A2A daemon
-  agy-bridge server restart            Restart A2A daemon
-  agy-bridge server run                Run A2A server in foreground
-  agy-bridge mcp                       Run A2A MCP server for Claude Code (stdio)
+  a2a-panel list                      List all Antigravity expert dev personas & specialties
+  a2a-panel status                    Show A2A server health & agent status
+  a2a-panel tasks                     List all running & recent tasks (alias: ps)
+  a2a-panel doctor                    Check Node, agy, sign-in, git, data folder and Claude Code setup
+  a2a-panel init [--dry-run]          Register this bridge as an MCP server in Claude Code
+  a2a-panel usage                     Show Antigravity token usage totals (tokens kept off Claude's bill)
+  a2a-panel logs [taskId] [-f]        View or stream live logs of a task (or latest task)
+  a2a-panel dashboard [--no-open]     Open the web task panel (monitor, dispatch, cancel)
+  a2a-panel run <role> "<task prompt>"  Dispatch task to an Antigravity developer
+  a2a-panel presets [list]            List preference presets (coding style, libraries, tech defaults)
+  a2a-panel presets show <id>         Print a preset's markdown files
+  a2a-panel presets templates         List the starter templates presets can be created from
+  a2a-panel presets new <id> [--template <t> | --from <preset>]   Create a preset
+  a2a-panel presets default <id|none> Set or clear the preset used when none is given
+  a2a-panel presets delete <id>       Delete a preset
+  a2a-panel server start              Start A2A protocol HTTP & JSON-RPC daemon in background
+  a2a-panel server stop               Stop background A2A daemon
+  a2a-panel server restart            Restart A2A daemon
+  a2a-panel server run                Run A2A server in foreground
+  a2a-panel mcp                       Run A2A MCP server for Claude Code (stdio)
 
-Options for "agy-bridge run":
+Options for "a2a-panel run":
   --workspace <path>   Target workspace (defaults to current directory)
   --mode <mode>        Execution mode: accept-edits (default), plan
   --effort <effort>    Reasoning effort: low, medium, high (default), xhigh, max
@@ -178,13 +178,13 @@ async function handleServer(subcmd) {
     return;
   }
 
-  console.log('Unknown server command. Use "agy-bridge server [start|stop|restart|run]"');
+  console.log('Unknown server command. Use "a2a-panel server [start|stop|restart|run]"');
 }
 
 async function handleRun(args) {
   if (args.length < 2) {
-    console.error('Error: "agy-bridge run" requires <role> and "<prompt>"');
-    console.error('Example: agy-bridge run web-engineer "Create a responsive login form"');
+    console.error('Error: "a2a-panel run" requires <role> and "<prompt>"');
+    console.error('Example: a2a-panel run web-engineer "Create a responsive login form"');
     process.exit(1);
   }
 
@@ -222,12 +222,12 @@ async function handleRun(args) {
   }
 
   if (!role) {
-    console.error('Error: "agy-bridge run" requires a <role>');
+    console.error('Error: "a2a-panel run" requires a <role>');
     process.exit(1);
   }
 
   if (!prompt || !prompt.trim()) {
-    console.error('Error: "agy-bridge run" requires a non-empty "<prompt>" (flags may appear before or after it)');
+    console.error('Error: "a2a-panel run" requires a non-empty "<prompt>" (flags may appear before or after it)');
     process.exit(1);
   }
 
@@ -293,8 +293,8 @@ function handlePresets(args) {
       const list = presets.listPresets();
       if (!list.length) {
         console.log('No presets yet. Create one from a template, for example:');
-        console.log('  agy-bridge presets templates');
-        console.log('  agy-bridge presets new my-team --template nestjs-react');
+        console.log('  a2a-panel presets templates');
+        console.log('  a2a-panel presets new my-team --template nestjs-react');
         return;
       }
       console.log(`\nPresets (${presets.PRESETS_DIR})`);
@@ -311,7 +311,7 @@ function handlePresets(args) {
       }
       return;
     }
-    if (!id) throw new Error(`"agy-bridge presets ${sub}" needs a preset id`);
+    if (!id) throw new Error(`"a2a-panel presets ${sub}" needs a preset id`);
     if (sub === 'show') {
       const preset = presets.getPreset(id);
       console.log(`# ${preset.title}${preset.isDefault ? ' (default)' : ''}\n${preset.description}`);
@@ -553,7 +553,7 @@ async function main() {
     return;
   }
 
-  console.error(`Unknown command: "${cmd}". Run "agy-bridge help" for usage.`);
+  console.error(`Unknown command: "${cmd}". Run "a2a-panel help" for usage.`);
   process.exit(1);
 }
 

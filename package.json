@@ -1,19 +1,19 @@
 {
-  "name": "agy-bridge",
+  "name": "a2a-panel",
   "version": "0.1.0",
   "description": "Delegate coding work from Claude Code to a team of Google Antigravity (agy) specialists, with a web panel, token usage tracking and safe process control.",
   "author": "leavchandara",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/CHANDARA-code/agy-bridge.git"
+    "url": "git+https://github.com/CHANDARA-code/a2a-panel.git"
   },
-  "homepage": "https://github.com/CHANDARA-code/agy-bridge#readme",
+  "homepage": "https://github.com/CHANDARA-code/a2a-panel#readme",
   "bugs": {
-    "url": "https://github.com/CHANDARA-code/agy-bridge/issues"
+    "url": "https://github.com/CHANDARA-code/a2a-panel/issues"
   },
   "license": "MIT",
   "bin": {
-    "agy-bridge": "cli.js",
+    "a2a-panel": "cli.js",
     "a2a": "cli.js"
   },
   "main": "dispatcher.js",
@@ -23,7 +23,7 @@
   "scripts": {
     "test": "node --test test/server.test.js",
     "check": "node scripts/check-consistency.js",
-    "build:panel": "npm --prefix panel install && npm --prefix panel run build",
+    "build:panel": "npm --prefix panel ci && npm --prefix panel run build",
     "prepack": "npm run build:panel"
   },
   "files": [

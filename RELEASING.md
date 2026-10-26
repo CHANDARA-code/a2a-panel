@@ -25,7 +25,7 @@ The tag must equal `v` plus the `package.json` version, or the pipeline stops be
 
 Publishing is off until you set it up, and the first two steps are safe to skip if you only want GitHub releases.
 
-1. Choose a package name that is free on npm and set it as `name` in `package.json`. The name `agy-bridge` is already taken on npm.
+1. Check that the package name in `package.json` (`a2a-panel`) is still free on npm (`npm view a2a-panel` returns 404) or already belongs to you. It was free on 2026-10-26. The old name `agy-bridge` is taken by someone else.
 2. In the GitHub repository, go to **Settings → Secrets and variables → Actions** and add a secret named `NPM_TOKEN` (an npm automation token that can publish the package).
 3. Go to **Settings → Environments**, open the `npm-publish` environment (it is created on first use), and add yourself as a required reviewer. Every publish then waits for your approval, because an npm release can't be undone.
 

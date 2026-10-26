@@ -4,8 +4,8 @@ const { execFileSync } = require('child_process');
 const { AGY_BIN, LOGS_DIR } = require('./dispatcher');
 const { DATA_DIR } = require('./config');
 
-const MCP_NAME = 'agy-bridge';
-const LEGACY_MCP_NAMES = ['a2a-antigravity'];
+const MCP_NAME = 'a2a-panel';
+const LEGACY_MCP_NAMES = ['agy-bridge', 'a2a-antigravity'];
 const CLI_PATH = path.join(__dirname, 'cli.js');
 
 function tryRun(file, args, timeout = 20000) {
@@ -22,9 +22,12 @@ function claudeMcpList() {
   return result.ok ? result.output : null;
 }
 
-function isRegistered(listing) {
-  if (!listing) return false;
-  return [MCP_NAME, ...LEGACY_MCP_NAMES].some((name) => listing.includes(`${name}:`));
+function isRegistered(listing, name = MCP_NAME) {
+  return Boolean(listing) && listing.split('\n').some((line) => line.startsWith(`${name}:`));
+}
+
+function legacyRegistrations(listing) {
+  return LEGACY_MCP_NAMES.filter((name) => isRegistered(listing, name));
 }
 
 function runDoctor() {
@@ -64,8 +67,13 @@ function runDoctor() {
 
   const claude = tryRun('claude', ['--version']);
   if (claude.ok) {
-    const registered = isRegistered(claudeMcpList());
-    add(registered ? 'ok' : 'warn', 'Claude Code MCP server', registered ? 'registered' : 'not registered. Run "agy-bridge init".');
+    const listing = claudeMcpList();
+    const legacy = legacyRegistrations(listing);
+    if (isRegistered(listing)) {
+      add(legacy.length ? 'warn' : 'ok', 'Claude Code MCP server', legacy.length ? `registered, plus old name(s) ${legacy.join(', ')}. Run "a2a-panel init" to remove them.` : 'registered');
+    } else {
+      add('warn', 'Claude Code MCP server', legacy.length ? `registered under the old name ${legacy.join(', ')}. Run "a2a-panel init" to rename it.` : 'not registered. Run "a2a-panel init".');
+    }
   } else {
     add('warn', 'Claude Code', 'the "claude" command was not found, so MCP registration was not checked.');
   }
@@ -75,7 +83,7 @@ function runDoctor() {
 
 function printDoctor(checks) {
   const marks = { ok: '\x1b[32m✓\x1b[0m', warn: '\x1b[33m!\x1b[0m', fail: '\x1b[31m✗\x1b[0m' };
-  console.log('\nagy-bridge doctor\n');
+  console.log('\na2a-panel doctor\n');
   for (const check of checks) {
     console.log(`  ${marks[check.level]} ${check.label.padEnd(26)} ${check.detail}`);
   }
@@ -100,8 +108,14 @@ function runInit({ dryRun = false } = {}) {
     console.log('The "claude" command was not found. Install Claude Code, then run:\n\n  ' + printable + '\n');
     return false;
   }
-  if (isRegistered(claudeMcpList())) {
-    console.log('agy-bridge is already registered with Claude Code.');
+  const listing = claudeMcpList();
+  // Registrations under an old name of this project would start a second copy of the server.
+  for (const name of legacyRegistrations(listing)) {
+    const removed = tryRun('claude', ['mcp', 'remove', name], 60000);
+    console.log(removed.ok ? `Removed the old "${name}" MCP registration.` : `Could not remove the old "${name}" MCP registration. Run: claude mcp remove ${name}`);
+  }
+  if (isRegistered(listing)) {
+    console.log('a2a-panel is already registered with Claude Code.');
     return true;
   }
   const result = tryRun(command[0], command.slice(1), 60000);
@@ -109,7 +123,7 @@ function runInit({ dryRun = false } = {}) {
     console.log('Registration failed:\n' + result.output + '\n\nRun this yourself:\n\n  ' + printable + '\n');
     return false;
   }
-  console.log('Registered agy-bridge with Claude Code (user scope). Restart Claude Code or run /mcp to load it.');
+  console.log('Registered a2a-panel with Claude Code (user scope). Restart Claude Code or run /mcp to load it.');
   return true;
 }
 

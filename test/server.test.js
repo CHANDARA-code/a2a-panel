@@ -483,7 +483,7 @@ test('every role in the agent card has a shipped persona except the general lead
 
 test('doctor and init --dry-run run without touching Claude Code', () => {
   const dry = execFileSync(process.execPath, [path.join(ROOT, 'cli.js'), 'init', '--dry-run'], { encoding: 'utf-8' });
-  assert.match(dry, /claude mcp add --scope user agy-bridge/);
+  assert.match(dry, /claude mcp add --scope user a2a-panel/);
   const version = execFileSync(process.execPath, [path.join(ROOT, 'cli.js'), 'version'], { encoding: 'utf-8' });
   assert.match(version.trim(), /^\d+\.\d+\.\d+$/);
 });

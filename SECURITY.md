@@ -1,8 +1,8 @@
 # Security
 
-## What agy-bridge does with your machine
+## What a2a-panel does with your machine
 
-agy-bridge starts the Antigravity CLI (`agy`) with `--dangerously-skip-permissions`, because headless `agy` cannot ask for approval. A delegated task can read and write files and run shell commands in the workspace you give it, without a prompt. Only delegate work, and only open workspaces, that you would let an unattended script touch.
+a2a-panel starts the Antigravity CLI (`agy`) with `--dangerously-skip-permissions`, because headless `agy` cannot ask for approval. A delegated task can read and write files and run shell commands in the workspace you give it, without a prompt. Only delegate work, and only open workspaces, that you would let an unattended script touch.
 
 Use `--mode plan` for work that must not change anything.
 

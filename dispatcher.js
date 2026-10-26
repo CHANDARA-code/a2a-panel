@@ -266,7 +266,7 @@ const VERIFY_OUTPUT_LIMIT = 4000;
 function runVerification(command, cwd, logStream) {
   const timeoutMs = envInt('A2A_VERIFY_TIMEOUT_MS', 600000);
   const startedAt = Date.now();
-  logStream.write(`\n=== VERIFICATION (run by agy-bridge, not the agent): ${command} ===\n`);
+  logStream.write(`\n=== VERIFICATION (run by a2a-panel, not the agent): ${command} ===\n`);
   return new Promise((resolve) => {
     let tail = '';
     let timedOut = false;
