@@ -36,6 +36,7 @@ export function SignInModal({ account, provider, open, onClose, onSuccess, autoS
   const [starting, setStarting] = useState(false);
   const [code, setCode] = useState("");
   const [submittingCode, setSubmittingCode] = useState(false);
+  const [codeSent, setCodeSent] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const sessionRef = useRef<LoginSession | null>(null);
   sessionRef.current = session;
@@ -76,6 +77,12 @@ export function SignInModal({ account, provider, open, onClose, onSuccess, autoS
   }, [open, account?.id, provider?.id, autoStart]);
 
   const active = session && (session.state === "starting" || session.state === "waiting");
+  const awaitingCode = Boolean(session?.needsCode && session.state === "waiting");
+
+  useEffect(() => {
+    setCodeSent(false);
+    setCode("");
+  }, [session?.id]);
 
   useEffect(() => {
     if (!active || !session) return;
@@ -115,10 +122,11 @@ export function SignInModal({ account, provider, open, onClose, onSuccess, autoS
   };
 
   const submitCode = async () => {
-    if (!session || !code.trim()) return;
+    if (!session || !code.trim() || codeSent || submittingCode) return;
     setSubmittingCode(true);
     try {
       const next = await api.submitLoginCode(session.id, code.trim());
+      setCodeSent(true);
       setSession(next);
       if (next.state === "succeeded") {
         onSuccess();
@@ -254,7 +262,29 @@ export function SignInModal({ account, provider, open, onClose, onSuccess, autoS
               </Flex>
             )}
 
-            {session.needsCode && (
+            {awaitingCode && codeSent && (
+              <Alert
+                type="info"
+                showIcon
+                icon={<SyncOutlined spin />}
+                message="Code sent, finishing sign-in…"
+                description="This usually takes a few seconds."
+                action={
+                  <Button
+                    size="small"
+                    type="link"
+                    onClick={() => {
+                      setCodeSent(false);
+                      setCode("");
+                    }}
+                  >
+                    Use a different code
+                  </Button>
+                }
+              />
+            )}
+
+            {awaitingCode && !codeSent && (
               <Flex vertical gap={6}>
                 <Typography.Text type="secondary">
                   If the page shows a code, paste it here:
@@ -265,6 +295,7 @@ export function SignInModal({ account, provider, open, onClose, onSuccess, autoS
                     onChange={(e) => setCode(e.target.value)}
                     placeholder="Enter code"
                     onPressEnter={submitCode}
+                    disabled={submittingCode}
                   />
                   <Button type="primary" onClick={submitCode} loading={submittingCode} disabled={!code.trim()}>
                     Submit code

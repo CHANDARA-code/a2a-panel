@@ -159,7 +159,7 @@ function parseStatus(providerId, { exitCode, stdout = '', stderr = '' }) {
 
 function loginArgs(providerId, method) {
   if (providerId === 'agy') {
-    return method === 'browser' ? ['-p', 'Reply with the single word OK.', '--mode', 'plan', '--output-format', 'stream-json'] : [];
+    return method === 'browser' ? ['-p', '/help', '--output-format', 'stream-json'] : [];
   }
   if (providerId === 'claude') return ['auth', 'login'];
   if (providerId === 'codex') {

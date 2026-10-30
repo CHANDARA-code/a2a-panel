@@ -38,6 +38,7 @@ All notable changes to a2a-panel are listed here. The format follows [Keep a Cha
 - Claude sign-in failures are recognised only by Claude's own error wording, so a task's text cannot sign an account out.
 - A task on a signed-out Antigravity account no longer waits at agy's sign-in prompt until the time limit.
 - A running verification command can be cancelled.
+- Antigravity sign-in from the panel runs agy's local `/help` command instead of a model prompt, so it uses no tokens and finishes a few seconds after the code is pasted; the dialog shows that the code was sent and can't send it twice.
 - Sign-in codes are hidden from sign-in output for every provider; a sign-in that ignores SIGTERM is killed; a missing CLI no longer stops the server.
 - Codex keeps showing signed out after a task proves its stored sign-in was rejected, until you sign in again.
 - Leader-written verification commands run on the host only after explicit plan approval in plan-first mode, preventing untrusted command execution.

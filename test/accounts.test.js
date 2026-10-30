@@ -845,7 +845,7 @@ test('an Antigravity task on a signed-out account stops at the sign-in prompt in
   assert.strictEqual((await accountOf(signin, 'agy-out')).status.state, 'signed-out');
 });
 
-test('an Antigravity account signs in from the panel with a pasted code', async () => {
+test('an Antigravity account signs in from the panel with a pasted code, without a model prompt', async () => {
   const signin = await signinServer();
   await fetch(`${signin.base}/api/accounts`, { method: 'POST', headers: authed(), body: JSON.stringify({ id: 'agy-in', provider: 'agy' }) });
   const res = await fetch(`${signin.base}/api/accounts/agy-in/login`, { method: 'POST', headers: authed(), body: JSON.stringify({ method: 'browser' }) });
@@ -866,6 +866,11 @@ test('an Antigravity account signs in from the panel with a pasted code', async 
   const account = await accountOf(signin, 'agy-in');
   assert.strictEqual(account.status.state, 'signed-in');
   assert.strictEqual(account.status.warning, null);
+  const signInRuns = fs.readFileSync(signin.argsFile, 'utf-8').split('ARGV: ').slice(1)
+    .filter((record) => record.includes(`${path.join('agy-in', 'home')}\n`))
+    .map((record) => record.split('\n')[0])
+    .filter((argv) => argv !== 'models');
+  assert.deepStrictEqual(signInRuns, ['-p /help --output-format stream-json']);
 });
 
 test('auth words in the agent text do not sign the account out', async () => {
