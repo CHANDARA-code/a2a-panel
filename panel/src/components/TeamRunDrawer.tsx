@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Key } from "react";
 import {
   Alert,
@@ -22,7 +22,7 @@ import { CheckOutlined, FileTextOutlined, StopOutlined } from "@ant-design/icons
 import { api } from "../api";
 import type { TeamRun, TeamRunTask } from "../api";
 import { formatDateTime } from "../format";
-import { usePolling } from "../hooks";
+import { useServerEvent } from "../events";
 import { TeamRunStatusTag, TeamTaskStatusTag } from "./StatusTag";
 import { AccountAvatar } from "./AccountAvatar";
 
@@ -77,14 +77,32 @@ export function TeamRunDrawer({ runId, open, isMobile, onClose, onOpenTask }: Te
     setExpandedKeys(null);
   }, [runId]);
 
-  const detail = usePolling(
-    () => api.teamRun(runId as string),
-    2000,
-    open && runId !== null,
-    runId
-  );
+  const [run, setRun] = useState<TeamRun | null>(null);
 
-  const run: TeamRun | null = detail.data;
+  const fetchRun = useCallback(async () => {
+    if (!open || !runId) return;
+    try {
+      const data = await api.teamRun(runId);
+      setRun(data);
+    } catch {}
+  }, [open, runId]);
+
+  useEffect(() => {
+    if (!open || !runId) {
+      setRun(null);
+      return;
+    }
+    fetchRun();
+  }, [open, runId, fetchRun]);
+
+  useServerEvent("teams", () => {
+    if (open && runId) fetchRun();
+  });
+
+  useServerEvent("tasks", () => {
+    if (open && runId) fetchRun();
+  });
+
   const isActive =
     run !== null &&
     (run.status === "planning" ||
@@ -98,7 +116,7 @@ export function TeamRunDrawer({ runId, open, isMobile, onClose, onOpenTask }: Te
     try {
       await api.executeTeamRun(run.id);
       message.success("Plan execution started");
-      detail.refresh();
+      fetchRun();
     } catch (err) {
       message.error(err instanceof Error ? err.message : "Failed to execute plan");
     } finally {
@@ -112,7 +130,7 @@ export function TeamRunDrawer({ runId, open, isMobile, onClose, onOpenTask }: Te
     try {
       await api.cancelTeamRun(run.id);
       message.success("Run cancelled");
-      detail.refresh();
+      fetchRun();
     } catch (err) {
       message.error(err instanceof Error ? err.message : "Failed to cancel run");
     } finally {

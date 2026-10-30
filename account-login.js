@@ -9,6 +9,24 @@ const childProcesses = new Map();
 const sessionTimers = new Map();
 const terminalSessions = new Map();
 const submittedCodes = new Map();
+const loginChangeListeners = new Set();
+
+function onLoginChange(listener) {
+  loginChangeListeners.add(listener);
+  return () => {
+    loginChangeListeners.delete(listener);
+  };
+}
+
+function notifyLoginChange(session) {
+  if (!session || !session.id) return;
+  const payload = { id: session.id, state: session.state };
+  for (const listener of loginChangeListeners) {
+    try {
+      listener(payload);
+    } catch (err) {}
+  }
+}
 
 function inTerminal(bin, args) {
   if (process.platform === 'darwin') return { bin: 'sh', args: ['-c', 'cat | script -q /dev/null "$@" 2>&1 | cat', 'sh', bin, ...args] };
@@ -154,6 +172,7 @@ function stopAllLogins() {
     if (session && (session.state === 'starting' || session.state === 'waiting')) {
       session.state = 'cancelled';
       session.finishedAt = new Date().toISOString();
+      notifyLoginChange(session);
     }
   }
   childProcesses.clear();
@@ -209,6 +228,7 @@ function startLogin(accountId, method) {
   };
 
   sessions.set(loginId, session);
+  notifyLoginChange(session);
   const timers = [];
   sessionTimers.set(loginId, timers);
 
@@ -226,12 +246,14 @@ function startLogin(accountId, method) {
       const proc = spawn(terminal[0], terminal[1], { detached: true, stdio: 'ignore' });
       proc.on('error', () => {
         session.terminalOpened = false;
+        notifyLoginChange(session);
       });
       proc.unref();
     }
 
     session.terminalOpened = Boolean(terminal);
     session.state = 'waiting';
+    notifyLoginChange(session);
 
     const pollTimer = setInterval(async () => {
       try {
@@ -241,6 +263,7 @@ function startLogin(accountId, method) {
           session.state = 'succeeded';
           session.finishedAt = new Date().toISOString();
           markSignedInHere(accountId);
+          notifyLoginChange(session);
         }
       } catch (err) {}
     }, 10000);
@@ -253,6 +276,7 @@ function startLogin(accountId, method) {
         session.state = 'failed';
         session.error = 'Login timed out waiting for sign-in';
         session.finishedAt = new Date().toISOString();
+        notifyLoginChange(session);
       }
     }, 15 * 60 * 1000);
     timeoutTimer.unref();
@@ -299,6 +323,7 @@ function startLogin(accountId, method) {
     session.state = 'failed';
     session.error = `Could not start ${bin}: ${err.message}`;
     session.finishedAt = new Date().toISOString();
+    notifyLoginChange(session);
   });
 
   const timeoutTimer = setTimeout(() => {
@@ -308,6 +333,7 @@ function startLogin(accountId, method) {
       session.state = 'failed';
       session.error = 'Login timed out after 15 minutes';
       session.finishedAt = new Date().toISOString();
+      notifyLoginChange(session);
     }
   }, 15 * 60 * 1000);
   timeoutTimer.unref();
@@ -332,6 +358,7 @@ function startLogin(accountId, method) {
     if (session.url && session.state === 'starting') {
       session.state = 'waiting';
     }
+    notifyLoginChange(session);
   };
 
   child.stdout.on('data', onData);
@@ -363,6 +390,7 @@ function startLogin(accountId, method) {
       session.error = lines.length ? lines[lines.length - 1] : 'Login process exited with error';
     }
     session.finishedAt = new Date().toISOString();
+    notifyLoginChange(session);
   });
 
   return session;
@@ -384,6 +412,7 @@ function submitCode(loginId, code) {
   if (codes) codes.push(code.trim());
   session.output = redact(session.output, codes || [code.trim()]);
   child.stdin.write(code.trim() + (terminalSessions.has(loginId) ? '\r' : '\n'));
+  notifyLoginChange(session);
   return session;
 }
 
@@ -401,6 +430,7 @@ function cancelLogin(loginId) {
   terminalSessions.delete(loginId);
   session.state = 'cancelled';
   session.finishedAt = new Date().toISOString();
+  notifyLoginChange(session);
   return session;
 }
 
@@ -409,5 +439,6 @@ module.exports = {
   startLogin,
   getLogin,
   submitCode,
-  cancelLogin
+  cancelLogin,
+  onLoginChange
 };

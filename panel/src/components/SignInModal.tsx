@@ -3,6 +3,7 @@ import { Alert, App as AntApp, Button, Collapse, Flex, Input, Modal, Result, Seg
 import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, LinkOutlined, StopOutlined, SyncOutlined } from "@ant-design/icons";
 import { api } from "../api";
 import type { Account, LoginMethod, LoginSession, LoginState, Provider } from "../api";
+import { useServerEvent } from "../events";
 import { AccountAvatar } from "./AccountAvatar";
 
 interface SignInModalProps {
@@ -79,25 +80,32 @@ export function SignInModal({ account, provider, open, onClose, onSuccess, autoS
   const active = session && (session.state === "starting" || session.state === "waiting");
   const awaitingCode = Boolean(session?.needsCode && session.state === "waiting");
 
+  const refreshSession = async (sessionId: string) => {
+    try {
+      const next = await api.getLoginSession(sessionId);
+      if (sessionRef.current?.id !== sessionId) return;
+      const alreadySucceeded = sessionRef.current.state === "succeeded";
+      setSession(next);
+      if (next.state === "succeeded" && !alreadySucceeded) {
+        onSuccess();
+      }
+    } catch {}
+  };
+
   useEffect(() => {
     setCodeSent(false);
     setCode("");
+    if (active && session) refreshSession(session.id);
   }, [session?.id]);
 
-  useEffect(() => {
-    if (!active || !session) return;
-    const sessionId = session.id;
-    const interval = window.setInterval(async () => {
-      try {
-        const next = await api.getLoginSession(sessionId);
-        setSession(next);
-        if (next.state === "succeeded") {
-          onSuccess();
-        }
-      } catch {}
-    }, 1500);
-    return () => window.clearInterval(interval);
-  }, [active, session?.id, onSuccess]);
+  useServerEvent("login", (data: { id: string; state: string }) => {
+    if (sessionRef.current && data.id === sessionRef.current.id) refreshSession(data.id);
+  });
+
+  useServerEvent("hello", () => {
+    const current = sessionRef.current;
+    if (current && (current.state === "starting" || current.state === "waiting")) refreshSession(current.id);
+  });
 
   useEffect(() => {
     return () => {

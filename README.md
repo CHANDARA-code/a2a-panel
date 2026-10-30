@@ -162,6 +162,14 @@ When running `a2a-panel server start`:
 - **Accounts** (panel API, token required for changes): `GET /api/accounts`, `POST /api/accounts` (`{id, provider, label?, model?}`), `PUT /api/accounts/:id`, `DELETE /api/accounts/:id`, `POST /api/accounts/:id/check`, `POST /api/accounts/:id/login`, `POST /api/accounts/:id/logout`, `GET /api/accounts/logins/:loginId`, `POST /api/accounts/logins/:loginId/code`, `POST /api/accounts/logins/:loginId/cancel`.
 - **Presets** (panel API, token required for changes): `GET /api/presets`, `POST /api/presets` (`{id, template?, from?, title?}`), `GET|PUT|DELETE /api/presets/:id`, `POST|DELETE /api/presets/:id/default`, and `POST /api/prompt-preview` (`{role, workspace, prompt, preset}`) to see the exact prompt.
 - **Task Status**: `GET http://127.0.0.1:5188/tasks/:id`. Returns status, output, `usage`, `verification`, `conversationId`, `changes`, `workspace`, `account` and `provider`. JSON-RPC `tasks/get` returns the same fields.
+- **Server-Sent Events Stream**: `GET http://127.0.0.1:5188/api/events` (`text/event-stream`). Streams real-time updates to the web panel so idle clients make no repeating polling requests. Emits initial burst on connect, then pushes updates only when data changes:
+  - `hello`: `{"uptimeSeconds": <number>, "pid": <number>}` on client connect.
+  - `tasks`: `{"tasks": [...]}` on connect and whenever task logs, process status, or task list fingerprint changes.
+  - `teams`: `{}` on connect and whenever team definitions or team run records change.
+  - `usage`: `{}` on connect and whenever `usage.jsonl` changes.
+  - `login`: `{"id": <loginId>, "state": <state>}` whenever an account login session updates (session details are fetched separately via `GET /api/accounts/logins/:id`).
+  - `: ping`: periodic comment sent every 25 seconds while idle to keep the connection alive.
+  - The panel opens one stream per visible tab, closes it while the tab is hidden, and reconnects on its own; at most 32 streams are served at once (`A2A_MAX_EVENT_CLIENTS`).
 - **JSON-RPC 2.0**: `POST http://127.0.0.1:5188/rpc` with `message/send`, `tasks/get`, `tasks/list` and `tasks/cancel`. Streaming and push notifications are not implemented; the agent card says so.
 
 ---

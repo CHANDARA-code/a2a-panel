@@ -19,6 +19,7 @@ import { DeleteOutlined, EditOutlined, PlayCircleOutlined, PlusOutlined, UserOut
 import { api } from "../api";
 import type { Account, Team, TeamRun } from "../api";
 import { formatAgo, formatDateTime } from "../format";
+import { useServerEvent } from "../events";
 import { RunTeamModal } from "./RunTeamModal";
 import { TeamEditor } from "./TeamEditor";
 import { TeamRunDrawer } from "./TeamRunDrawer";
@@ -69,22 +70,13 @@ export function TeamsView({ isMobile, onOpenTask }: TeamsViewProps) {
     refreshTeamsAndAccounts();
   }, [refreshTeamsAndAccounts]);
 
-  const hasActiveRun = runs.some(
-    (r) =>
-      r.status === "planning" ||
-      r.status === "planned" ||
-      r.status === "running" ||
-      r.status === "reviewing"
-  );
-
   useEffect(() => {
     refreshRuns();
-    const intervalMs = hasActiveRun ? 3000 : 15000;
-    const timer = window.setInterval(() => {
-      if (!document.hidden) refreshRuns();
-    }, intervalMs);
-    return () => window.clearInterval(timer);
-  }, [hasActiveRun, refreshRuns]);
+  }, [refreshRuns]);
+
+  useServerEvent("teams", () => {
+    refreshRuns();
+  });
 
   const handleDeleteTeam = async (team: Team) => {
     setDeletingId(team.id);

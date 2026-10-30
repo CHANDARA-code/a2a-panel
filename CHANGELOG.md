@@ -22,6 +22,10 @@ All notable changes to a2a-panel are listed here. The format follows [Keep a Cha
 - MCP tool `a2a_account_usage` reporting single-line account capacity and quota status.
 - CLI commands: `a2a-panel usage [--days N]` per-account breakdown and `a2a-panel accounts budget <id> (--period ... --tokens ... [--stop] | --clear)`.
 
+### Changed
+
+- The panel gets updates pushed over one event stream (`GET /api/events`) instead of polling, so an idle panel makes no repeating requests.
+
 ### Fixed
 
 - A team plan approved in one place (panel, CLI or Claude Code) shows as built everywhere and can only be built once; cancelling and building the same plan at the same moment cannot both win.

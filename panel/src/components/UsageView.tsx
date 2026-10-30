@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   App as AntApp,
@@ -28,9 +28,9 @@ import {
   SettingOutlined,
 } from "@ant-design/icons";
 import { api } from "../api";
-import type { AccountUsageEntry, ProviderId } from "../api";
+import type { AccountUsageEntry, AccountUsageReport, ProviderId } from "../api";
 import { formatAgo, formatDurationUntil } from "../format";
-import { usePolling } from "../hooks";
+import { useServerEvent } from "../events";
 import { BudgetModal } from "./BudgetModal";
 import { DailyUsageChart } from "./DailyUsageChart";
 import { AccountAvatar } from "./AccountAvatar";
@@ -78,10 +78,30 @@ export function UsageView({ isMobile }: UsageViewProps) {
   const [budgetModalOpen, setBudgetModalOpen] = useState(false);
   const [selectedAccount, setSelectedAccount] = useState<AccountUsageEntry | null>(null);
 
-  const fetchUsage = useCallback(() => api.usage(days), [days]);
-  const usageQuery = usePolling(fetchUsage, 30000, true, String(days));
+  const [report, setReport] = useState<AccountUsageReport | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
 
-  const report = usageQuery.data;
+  const fetchUsage = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await api.usage(days);
+      setReport(data);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error(String(err)));
+    } finally {
+      setLoading(false);
+    }
+  }, [days]);
+
+  useEffect(() => {
+    fetchUsage();
+  }, [fetchUsage]);
+
+  useServerEvent("usage", () => {
+    fetchUsage();
+  });
 
   const accountsNearLimit = useMemo(() => {
     return (report?.accounts ?? []).filter((acc) => {
@@ -118,7 +138,7 @@ export function UsageView({ isMobile }: UsageViewProps) {
     try {
       await api.deleteBudget(accountId);
       message.success("Budget removed");
-      usageQuery.refresh();
+      fetchUsage();
     } catch (err) {
       message.error(err instanceof Error ? err.message : "Failed to remove budget");
     }
@@ -150,23 +170,23 @@ export function UsageView({ isMobile }: UsageViewProps) {
           />
           <Button
             icon={<ReloadOutlined />}
-            loading={usageQuery.loading}
-            onClick={() => usageQuery.refresh()}
+            loading={loading}
+            onClick={() => fetchUsage()}
             aria-label="Refresh usage data"
           />
         </Flex>
       </Flex>
 
-      {usageQuery.error && (
+      {error && (
         <Alert
           type="error"
           showIcon
           message="Failed to load usage report"
-          description={usageQuery.error.message}
+          description={error.message}
         />
       )}
 
-      {usageQuery.loading && !report && <Skeleton active paragraph={{ rows: 6 }} />}
+      {loading && !report && <Skeleton active paragraph={{ rows: 6 }} />}
 
       {report && (
         <>
@@ -594,7 +614,7 @@ export function UsageView({ isMobile }: UsageViewProps) {
         open={budgetModalOpen}
         account={selectedAccount}
         onClose={() => setBudgetModalOpen(false)}
-        onSuccess={() => usageQuery.refresh()}
+        onSuccess={() => fetchUsage()}
       />
     </Flex>
   );

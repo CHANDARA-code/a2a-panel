@@ -748,6 +748,187 @@ function serveStatic(res, pathname, token) {
   return stream.pipe(res);
 }
 
+const eventClients = new Set();
+let watcherTimer = null;
+let lastTasksStamp = '';
+let lastTasksFingerprint = '';
+let lastTasksList = [];
+let lastUsageStamp = '';
+let lastTeamsStamp = '';
+let pingTicks = 0;
+
+function writeClient(res, payload) {
+  if (res.writableEnded || res.destroyed) return;
+  try {
+    res.write(payload);
+  } catch (err) {}
+}
+
+function broadcastRaw(payload) {
+  for (const client of eventClients) {
+    writeClient(client.res, payload);
+  }
+}
+
+function broadcastEvent(name, data) {
+  broadcastRaw(`event: ${name}\ndata: ${JSON.stringify(data)}\n\n`);
+}
+
+function getTasksStamp() {
+  if (!fs.existsSync(LOGS_DIR)) return '';
+  try {
+    const entries = fs.readdirSync(LOGS_DIR)
+      .filter((name) => /^a2a_[\w-]+\.(log|pid|cancelled|verify)$/.test(name))
+      .sort();
+    return entries.map((name) => {
+      try {
+        const s = fs.statSync(path.join(LOGS_DIR, name));
+        return `${name}:${s.mtimeMs}:${s.size}`;
+      } catch (err) {
+        return '';
+      }
+    }).join(';');
+  } catch (err) {
+    return '';
+  }
+}
+
+function getTasksFingerprint(tasks) {
+  return JSON.stringify(tasks.map((t) => (t.status === 'running' ? { ...t, durationMs: null } : t)));
+}
+
+function getUsageStamp() {
+  const usageFile = path.join(LOGS_DIR, 'usage.jsonl');
+  try {
+    const s = fs.statSync(usageFile);
+    return `${s.mtimeMs}:${s.size}`;
+  } catch (err) {
+    return 'none';
+  }
+}
+
+function dirJsonStamp(dir) {
+  if (!fs.existsSync(dir)) return '';
+  try {
+    const files = fs.readdirSync(dir)
+      .filter((name) => name.endsWith('.json') && !name.includes('.tmp'))
+      .sort();
+    return files.map((name) => {
+      try {
+        const s = fs.statSync(path.join(dir, name));
+        return `${name}:${s.mtimeMs}:${s.size}`;
+      } catch (err) {
+        return '';
+      }
+    }).join(';');
+  } catch (err) {
+    return '';
+  }
+}
+
+function getTeamsStamp() {
+  return `${dirJsonStamp(teams.getTeamsDir())}|${dirJsonStamp(teams.getRunsDir())}`;
+}
+
+function watcherTick() {
+  pingTicks++;
+  if (pingTicks >= 17) {
+    pingTicks = 0;
+    broadcastRaw(': ping\n\n');
+  }
+
+  const currentTasksStamp = getTasksStamp();
+  const hasRunning = lastTasksList.some((t) => t.status === 'running');
+  if (currentTasksStamp !== lastTasksStamp || hasRunning) {
+    lastTasksStamp = currentTasksStamp;
+    const currentTasks = listTasks();
+    const currentFingerprint = getTasksFingerprint(currentTasks);
+    if (currentFingerprint !== lastTasksFingerprint) {
+      lastTasksFingerprint = currentFingerprint;
+      lastTasksList = currentTasks;
+      broadcastEvent('tasks', { tasks: currentTasks });
+    } else {
+      lastTasksList = currentTasks;
+    }
+  }
+
+  const currentUsageStamp = getUsageStamp();
+  if (currentUsageStamp !== lastUsageStamp) {
+    lastUsageStamp = currentUsageStamp;
+    broadcastEvent('usage', {});
+  }
+
+  const currentTeamsStamp = getTeamsStamp();
+  if (currentTeamsStamp !== lastTeamsStamp) {
+    lastTeamsStamp = currentTeamsStamp;
+    broadcastEvent('teams', {});
+  }
+}
+
+function startWatcher() {
+  if (watcherTimer) return;
+  lastTasksStamp = getTasksStamp();
+  lastTasksList = listTasks();
+  lastTasksFingerprint = getTasksFingerprint(lastTasksList);
+  lastUsageStamp = getUsageStamp();
+  lastTeamsStamp = getTeamsStamp();
+  pingTicks = 0;
+  watcherTimer = setInterval(watcherTick, 1500);
+  if (watcherTimer.unref) watcherTimer.unref();
+}
+
+function stopWatcher() {
+  if (watcherTimer) {
+    clearInterval(watcherTimer);
+    watcherTimer = null;
+  }
+}
+
+accountLogin.onLoginChange((evt) => {
+  broadcastEvent('login', { id: evt.id, state: evt.state });
+});
+
+function handleEvents(req, res) {
+  const maxClients = Number(process.env.A2A_MAX_EVENT_CLIENTS) || 32;
+  if (eventClients.size >= maxClients) {
+    sendJson(res, 503, { error: 'Too many event streams' });
+    return;
+  }
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'X-Content-Type-Options': 'nosniff'
+  });
+  writeClient(res, 'retry: 3000\n\n');
+  const helloData = {
+    uptimeSeconds: Math.floor((Date.now() - START_TIME) / 1000),
+    pid: process.pid
+  };
+  writeClient(res, `event: hello\ndata: ${JSON.stringify(helloData)}\n\n`);
+  writeClient(res, `event: tasks\ndata: ${JSON.stringify({ tasks: listTasks() })}\n\n`);
+  writeClient(res, `event: teams\ndata: {}\n\n`);
+  writeClient(res, `event: usage\ndata: {}\n\n`);
+
+  const client = { req, res };
+  eventClients.add(client);
+  if (eventClients.size === 1) {
+    startWatcher();
+  }
+
+  const cleanup = () => {
+    if (!eventClients.has(client)) return;
+    eventClients.delete(client);
+    if (eventClients.size === 0) {
+      stopWatcher();
+    }
+  };
+
+  req.on('close', cleanup);
+  res.on('close', cleanup);
+  res.on('error', cleanup);
+}
+
 async function handle(req, res, pathname, { token }) {
   const method = req.method;
 
@@ -757,6 +938,11 @@ async function handle(req, res, pathname, { token }) {
   }
 
   if (!pathname.startsWith('/api/')) return false;
+
+  if (method === 'GET' && pathname === '/api/events') {
+    handleEvents(req, res);
+    return true;
+  }
 
   if (method === 'GET' && pathname === '/api/health') {
     const tasks = listTasks();

@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   App as AntApp,
@@ -20,7 +20,7 @@ import { MoonOutlined, PlusOutlined, ReloadOutlined, SunOutlined, ThunderboltOut
 import { api } from "./api";
 import type { DispatchInput, Task } from "./api";
 import { formatUptime } from "./format";
-import { usePolling } from "./hooks";
+import { useServerConnection, useServerEvent } from "./events";
 import { darkAntdTheme, lightAntdTheme, useTheme } from "./theme";
 import { NewTaskModal } from "./components/NewTaskModal";
 import { TaskDrawer } from "./components/TaskDrawer";
@@ -58,8 +58,52 @@ function Panel() {
   const screens = Grid.useBreakpoint();
   const isMobile = !screens.md;
 
-  const tasks = usePolling(api.tasks, 3000);
-  const health = usePolling(api.health, 5000);
+  const { failed } = useServerConnection();
+  const offline = failed;
+
+  const [rawTasks, setRawTasks] = useState<Task[] | null>(null);
+  const [tasksLoading, setTasksLoading] = useState(true);
+  const [serverStartedAtMs, setServerStartedAtMs] = useState<number | null>(null);
+  const [uptimeNow, setUptimeNow] = useState(() => Date.now());
+  const [durationNow, setDurationNow] = useState(() => Date.now());
+
+  useServerEvent("hello", (data: { uptimeSeconds: number; pid: number }) => {
+    if (typeof data?.uptimeSeconds === "number") {
+      setServerStartedAtMs(Date.now() - data.uptimeSeconds * 1000);
+    }
+  });
+
+  useServerEvent("tasks", (data: { tasks: Task[] }) => {
+    if (Array.isArray(data?.tasks)) {
+      setRawTasks(data.tasks);
+      setTasksLoading(false);
+    }
+  });
+
+  const refreshTasks = useCallback(async () => {
+    try {
+      const res = await api.tasks();
+      setRawTasks(res);
+      setTasksLoading(false);
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setUptimeNow(Date.now());
+    }, 30000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const hasRunning = (rawTasks ?? []).some((task) => task.status === "running");
+
+  useEffect(() => {
+    if (!hasRunning) return;
+    const timer = setInterval(() => {
+      setDurationNow(Date.now());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [hasRunning]);
 
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
@@ -95,7 +139,20 @@ function Panel() {
     />
   );
 
-  const all = useMemo(() => tasks.data ?? [], [tasks.data]);
+  const all = useMemo(() => {
+    if (!rawTasks) return [];
+    return rawTasks.map((task) => {
+      if (task.status === "running") {
+        const startMs = Date.parse(task.startedAt);
+        return {
+          ...task,
+          durationMs: Number.isNaN(startMs) ? null : Math.max(0, durationNow - startMs),
+        };
+      }
+      return task;
+    });
+  }, [rawTasks, durationNow]);
+
   const counts = useMemo(() => {
     const result = { running: 0, completed: 0, failed: 0, cancelled: 0, stale: 0 };
     for (const task of all) result[task.status] += 1;
@@ -118,7 +175,7 @@ function Panel() {
     try {
       await api.cancel(task.id);
       message.success("Cancel requested");
-      await Promise.all([tasks.refresh(), health.refresh()]);
+      await refreshTasks();
     } catch (err) {
       message.error(err instanceof Error ? err.message : "Cancel failed");
     } finally {
@@ -149,8 +206,7 @@ function Panel() {
   const created = (taskId: string) => {
     setComposerOpen(false);
     setSelectedId(taskId);
-    tasks.refresh();
-    health.refresh();
+    refreshTasks();
   };
 
   const stats = [
@@ -160,7 +216,7 @@ function Panel() {
     { key: "all" as const, title: "Total", value: all.length, color: token.colorText },
   ];
 
-  const offline = tasks.error !== null;
+  const uptimeText = serverStartedAtMs !== null ? formatUptime(Math.floor((uptimeNow - serverStartedAtMs) / 1000)) : "";
 
   return (
     <Layout style={{ minHeight: "100dvh" }}>
@@ -183,7 +239,7 @@ function Panel() {
           </Typography.Title>
           {!isMobile && (
             <Tag color={offline ? "error" : "success"} style={{ marginInlineStart: 4 }}>
-              {offline ? "Offline" : `Online${health.data ? ` · up ${formatUptime(health.data.uptimeSeconds)}` : ""}`}
+              {offline ? "Offline" : `Online${uptimeText ? ` · up ${uptimeText}` : ""}`}
             </Tag>
           )}
           {!isMobile && <div style={{ marginInlineStart: 12 }}>{viewSwitch}</div>}
@@ -208,7 +264,7 @@ function Panel() {
               type="error"
               showIcon
               message="Cannot reach the A2A server"
-              description={`${tasks.error?.message}. Retrying every few seconds.`}
+              description="Reconnecting…"
             />
           )}
 
@@ -250,7 +306,7 @@ function Panel() {
                     styles={{ body: { padding: isMobile ? 12 : 16 } }}
                     style={filter === stat.key ? { borderColor: token.colorPrimary } : undefined}
                   >
-                    <Statistic title={stat.title} value={stat.value} valueStyle={{ color: stat.color, fontWeight: 600 }} loading={tasks.loading} />
+                    <Statistic title={stat.title} value={stat.value} valueStyle={{ color: stat.color, fontWeight: 600 }} loading={tasksLoading} />
                   </Card>
                 ))}
               </Flex>
@@ -268,13 +324,13 @@ function Panel() {
                 </div>
                 <Flex gap={8} style={{ flex: isMobile ? undefined : "0 1 360px" }}>
                   <Input.Search allowClear placeholder="Search role, prompt, workspace, id" value={query} onChange={(event) => setQuery(event.target.value)} />
-                  <Button aria-label="Refresh" icon={<ReloadOutlined />} onClick={() => { tasks.refresh(); health.refresh(); }} />
+                  <Button aria-label="Refresh" icon={<ReloadOutlined />} onClick={() => refreshTasks()} />
                 </Flex>
               </Flex>
 
               <TaskList
                 tasks={visible}
-                loading={tasks.loading}
+                loading={tasksLoading}
                 isMobile={isMobile}
                 cancelling={cancelling}
                 onOpen={(task) => setSelectedId(task.id)}

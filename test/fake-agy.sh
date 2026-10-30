@@ -69,6 +69,9 @@ case "$MODE" in
     exit 0
     ;;
   stream)
+    if [ -n "$FAKE_AGY_STREAM_DELAY" ]; then
+      sleep "$FAKE_AGY_STREAM_DELAY"
+    fi
     echo '{"event":"init","conversation_id":"conv-12345678","init":{"cwd":"/x"}}'
     echo '{"event":"step_update","step_update":{"step_index":2,"state":"ACTIVE","step_type":"agent_response","text_delta":"Hello "}}'
     echo '{"event":"step_update","step_update":{"step_index":3,"state":"DONE","step_type":"run_command"}}'
