@@ -344,10 +344,8 @@ async function handlePresets(req, res, method, pathname) {
 }
 
 function decorateAccount(acc) {
-  const { getBudgetUsed } = require('./usage');
-  const usage = readUsageTotals();
-  const byAccount = usage.byAccount || {};
-  const u = byAccount[acc.id] || { tasks: 0, total_tokens: 0 };
+  const { getBudgetUsed, accountUsageTotals } = require('./usage');
+  const u = accountUsageTotals(acc);
   return {
     ...acc,
     system: Boolean(acc.system),

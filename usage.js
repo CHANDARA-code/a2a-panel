@@ -39,6 +39,22 @@ function readUsageRecords() {
   return records;
 }
 
+function usageCountsFor(account, record) {
+  if (record.account !== account.id) return false;
+  if (!account.createdAt || !record.at) return true;
+  return Date.parse(record.at) >= Date.parse(account.createdAt);
+}
+
+function accountUsageTotals(account, records = null) {
+  const totals = { tasks: 0, total_tokens: 0 };
+  for (const r of records || readUsageRecords()) {
+    if (!usageCountsFor(account, r)) continue;
+    totals.tasks++;
+    totals.total_tokens += Number(r.usage && r.usage.total_tokens) || 0;
+  }
+  return totals;
+}
+
 function getBudgetUsed(account, records = null, now = new Date()) {
   if (!account || !account.budget) return null;
   const { period, tokens } = account.budget;
@@ -46,7 +62,7 @@ function getBudgetUsed(account, records = null, now = new Date()) {
   const allRecords = records || readUsageRecords();
   let used = 0;
   for (const r of allRecords) {
-    if (r.account === account.id && r.usage && r.at) {
+    if (usageCountsFor(account, r) && r.usage && r.at) {
       const atDate = new Date(r.at);
       if (atDate >= start) {
         used += Number(r.usage.total_tokens) || 0;
@@ -99,8 +115,8 @@ function getAccountsUsageReport(days = 30, now = new Date()) {
   const allAccounts = listAccounts();
 
   const accountEntries = allAccounts.map((acc) => {
-    const accRecords = inRangeRecords.filter((r) => r.account === acc.id);
-    const accAllRecords = allRecords.filter((r) => r.account === acc.id);
+    const accRecords = inRangeRecords.filter((r) => usageCountsFor(acc, r));
+    const accAllRecords = allRecords.filter((r) => usageCountsFor(acc, r));
 
     const accTotals = {
       tasks: accRecords.length,
@@ -391,7 +407,7 @@ function formatAccountUsageForMcp(now = new Date()) {
     let todayTokens = 0;
     let last7dTokens = 0;
     for (const r of allRecords) {
-      if (r.account !== acc.id || !r.at) continue;
+      if (!usageCountsFor(acc, r) || !r.at) continue;
       const d = new Date(r.at);
       const tok = Number(r.usage && r.usage.total_tokens) || 0;
       if (d >= todayStart) todayTokens += tok;
@@ -434,6 +450,8 @@ function formatAccountUsageForMcp(now = new Date()) {
 module.exports = {
   getPeriodStart,
   readUsageRecords,
+  usageCountsFor,
+  accountUsageTotals,
   getBudgetUsed,
   getAccountsUsageReport,
   formatClaudeWindowLabel,

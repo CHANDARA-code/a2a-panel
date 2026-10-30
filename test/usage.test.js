@@ -192,7 +192,7 @@ test('Claude quota windows stored with labels, percent and ISO reset', async () 
   const lastRecord = JSON.parse(usageLines[usageLines.length - 1]);
   assert(lastRecord.models);
   assert(lastRecord.models['claude-opus-5-5']);
-  assert.strictEqual(lastRecord.models['claude-opus-5-5'].total_tokens, 4 + 59935 + 17132 + 299);
+  assert.strictEqual(lastRecord.models['claude-opus-5-5'].total_tokens, 4 + 17132 + 299, 'per-model totals leave out the 59935 cache reads too');
   assert.strictEqual(lastRecord.models['claude-opus-5-5'].cost_usd, 0.155039);
 });
 
@@ -736,4 +736,23 @@ test('Codex quota is read from the account folder even when CODEX_HOME is set fo
   await waitFor(async () => ['completed', 'failed', 'cancelled'].includes((await (await fetch(`${instance.base}/api/tasks/${taskId}`)).json()).task?.status));
   const acc = (await (await fetch(`${instance.base}/api/accounts`)).json()).accounts.find((a) => a.id === 'codex-home-acc');
   assert.ok(acc.limits && acc.limits.windows.length === 2, JSON.stringify(acc.limits));
+});
+
+test('an account added again under a used id starts with none of the old account usage or budget spend', async () => {
+  const usageFile = path.join(main.logsDir, 'usage.jsonl');
+  const record = (at, taskId, tokens) => JSON.stringify({ at, taskId, role: 'web-engineer', status: 'completed', account: 'claude-reused', provider: 'claude', usage: { total_tokens: tokens } }) + '\n';
+  fs.appendFileSync(usageFile, record(new Date(Date.now() - 60000).toISOString(), 'a2a_1_previous_owner', 9000));
+  await fetch(`${main.base}/api/accounts`, { method: 'POST', headers: authed(), body: JSON.stringify({ id: 'claude-reused', provider: 'claude' }) });
+  await fetch(`${main.base}/api/accounts/claude-reused/budget`, { method: 'PUT', headers: authed(), body: JSON.stringify({ period: 'month', tokens: 10000, stop: false }) });
+
+  const fresh = (await (await fetch(`${main.base}/api/accounts`)).json()).accounts.find((a) => a.id === 'claude-reused');
+  assert.deepStrictEqual(fresh.usage, { tasks: 0, total_tokens: 0 });
+  assert.strictEqual(fresh.budgetUsed.tokens, 0);
+  const report = (await (await fetch(`${main.base}/api/usage/accounts?days=7`)).json()).accounts.find((a) => a.id === 'claude-reused');
+  assert.strictEqual(report.totals.tasks, 0);
+
+  fs.appendFileSync(usageFile, record(new Date(Date.now() + 1000).toISOString(), 'a2a_2_new_owner', 700));
+  const used = (await (await fetch(`${main.base}/api/accounts`)).json()).accounts.find((a) => a.id === 'claude-reused');
+  assert.deepStrictEqual(used.usage, { tasks: 1, total_tokens: 700 });
+  assert.strictEqual(used.budgetUsed.tokens, 700);
 });

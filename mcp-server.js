@@ -4,7 +4,7 @@ const readline = require('readline');
 const path = require('path');
 const fs = require('fs');
 const { execFileSync } = require('child_process');
-const { getAgentCard, runAgyTask, cancelTask, activeTasks, readUsageTotals } = require('./dispatcher');
+const { getAgentCard, runAgyTask, cancelTask, activeTasks } = require('./dispatcher');
 const presets = require('./presets');
 const accounts = require('./accounts');
 const providers = require('./providers');
@@ -452,12 +452,12 @@ rl.on('line', async (line) => {
       }
 
       if (toolName === 'a2a_list_accounts') {
+        const { readUsageRecords, accountUsageTotals } = require('./usage');
         const list = accounts.listAccounts();
-        const totals = readUsageTotals();
-        const byAccount = totals.byAccount || {};
+        const records = readUsageRecords();
         const lines = list.map((a) => {
           const providerName = (providers.PROVIDERS[a.provider] && providers.PROVIDERS[a.provider].name) || a.provider;
-          const u = byAccount[a.id] || { tasks: 0, total_tokens: 0 };
+          const u = accountUsageTotals(a, records);
           return `- ${a.id} (${providerName}, ${a.label}): ${a.status.state} - ${a.status.detail}; ${u.tasks} tasks, ${u.total_tokens} tokens`;
         });
         return sendRpcResponse(id, {

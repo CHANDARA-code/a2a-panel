@@ -125,17 +125,36 @@ async function downloadPicture(raw) {
   }
 }
 
+function sameEmail(a, b) {
+  return Boolean(a && b && a.toLowerCase() === b.toLowerCase());
+}
+
+function claudeIdentity(account) {
+  const home = account.system ? (process.env.CLAUDE_CONFIG_DIR || accounts.getRealHome()) : accounts.accountFolder(account);
+  let profile = {};
+  try {
+    profile = JSON.parse(fs.readFileSync(path.join(home, '.claude.json'), 'utf-8')).oauthAccount || {};
+  } catch (err) {}
+  const email = account.status.email || profile.emailAddress || null;
+  if (!email) return null;
+  const sameAccount = !profile.emailAddress || sameEmail(profile.emailAddress, email);
+  const name = sameAccount ? [profile.displayName, profile.fullName].find((value) => typeof value === 'string' && value.trim()) : null;
+  return { name: name ? name.trim() : null, email, plan: account.status.plan || null, pictureUrl: null, source: 'claude-status' };
+}
+
 async function refreshIdentity(account) {
   if (!account || account.status.state !== 'signed-in') return null;
   let identity = null;
   if (account.provider === 'claude') {
-    identity = account.status.email ? { name: null, email: account.status.email, plan: account.status.plan || null, pictureUrl: null, source: 'claude-status' } : null;
+    identity = claudeIdentity(account);
   } else if (account.provider === 'codex') {
     identity = codexIdentity(providerHome(account));
   } else if (account.provider === 'agy') {
     identity = await agyIdentity(providerHome(account));
   }
   if (!identity) return null;
+  const previous = account.identity;
+  if (!identity.name && previous && previous.name && sameEmail(previous.email, identity.email)) identity.name = previous.name;
   const { pictureUrl, ...saved } = identity;
   if (pictureUrl) {
     const picture = await downloadPicture(pictureUrl);

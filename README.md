@@ -402,6 +402,8 @@ Each account can have a custom avatar picture (PNG, JPEG, WebP, max 512 KB) uplo
 
 The panel tracks token usage across tasks and monitors provider plan quotas and user-defined token budgets:
 
+- **What a token total means**: for every CLI it is new input plus output. New input is input not read from a prompt cache (for Claude Code it includes cache writes; for Codex it is input minus cached input). Cache reads are recorded separately as `cache_read_tokens`, so totals and budgets compare fairly across Antigravity, Claude Code and Codex.
+- **Accounts added again**: usage counts for an added account only from the moment it was created, so an account that reuses the id of a deleted one starts at zero.
 - **Provider Quotas**:
   - **Claude Code**: Captures rate limit events and displays unified windows (`5-hour`, `7-day`, `7-day Opus`, `7-day Sonnet`) with utilization percentages and reset times. Status turns `limited` if rate limit status is not allowed or the task encounters a usage limit error.
   - **Codex**: Reads rate limits from the task's own session rollout file under `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*-<thread_id>.jsonl` with `5-hour` and `Weekly` windows. Status turns `limited` when a rate limit reached type is reported.

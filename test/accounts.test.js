@@ -329,11 +329,11 @@ test('claude task: text output, [tool] Bash: ... log line, normalised usage, con
   const resTaskDetail = await fetch(`${main.base}/tasks/${taskId}`, { headers: authed() });
   const taskRecord = await resTaskDetail.json();
   assert.strictEqual(taskRecord.conversationId, 'claude-session-987');
-  assert.strictEqual(taskRecord.usage.input_tokens, 35);
+  assert.strictEqual(taskRecord.usage.input_tokens, 15, 'new input is uncached input plus cache writes');
   assert.strictEqual(taskRecord.usage.cache_read_tokens, 20);
   assert.strictEqual(taskRecord.usage.output_tokens, 15);
   assert.strictEqual(taskRecord.usage.thinking_tokens, 5);
-  assert.strictEqual(taskRecord.usage.total_tokens, 50);
+  assert.strictEqual(taskRecord.usage.total_tokens, 30, 'cache reads are not counted in the total, as for Antigravity');
   assert.strictEqual(taskRecord.usage.cost_usd, 0.01);
 
   fs.writeFileSync(main.argsFile, '');
@@ -411,11 +411,11 @@ test('codex task: success parsing, and an auth-expired run marks the task failed
   const taskRecord = await resTaskDetail.json();
   assert.strictEqual(taskRecord.conversationId, 'codex-thread-111');
   assert.strictEqual(taskRecord.output.trim(), 'Codex finished all tasks.');
-  assert.strictEqual(taskRecord.usage.input_tokens, 50);
+  assert.strictEqual(taskRecord.usage.input_tokens, 40, 'Codex input minus its cached input');
   assert.strictEqual(taskRecord.usage.cache_read_tokens, 10);
   assert.strictEqual(taskRecord.usage.output_tokens, 25);
   assert.strictEqual(taskRecord.usage.thinking_tokens, 5);
-  assert.strictEqual(taskRecord.usage.total_tokens, 75);
+  assert.strictEqual(taskRecord.usage.total_tokens, 65, 'cache reads are not counted in the total, as for Antigravity');
 
   fs.writeFileSync(path.join(main.accountsDir, 'cx1', 'codex', '.codex-mode'), 'auth-expired\n');
   const resAuthFail = await fetch(`${main.base}/api/tasks`, {
@@ -1038,6 +1038,19 @@ function fakeJwt(claims) {
   return `${part({ alg: 'none' })}.${part(claims)}.signature`;
 }
 
+test('a Claude account shows its Claude display name from its own folder, not from another account', async () => {
+  const dir = await signedInClaude(main, 'c-name');
+  fs.writeFileSync(path.join(dir, '.claude.json'), JSON.stringify({ oauthAccount: { displayName: 'Ada', fullName: 'Ada Lovelace', emailAddress: 'user@example.com' } }));
+  const named = (await (await fetch(`${main.base}/api/accounts/c-name/check`, { method: 'POST', headers: authed() })).json()).account;
+  assert.strictEqual(named.identity.name, 'Ada');
+  assert.strictEqual(named.identity.email, 'user@example.com');
+
+  const other = await signedInClaude(main, 'c-other');
+  fs.writeFileSync(path.join(other, '.claude.json'), JSON.stringify({ oauthAccount: { displayName: 'Somebody Else', emailAddress: 'else@example.com' } }));
+  const mismatch = (await (await fetch(`${main.base}/api/accounts/c-other/check`, { method: 'POST', headers: authed() })).json()).account;
+  assert.strictEqual(mismatch.identity.name, null);
+});
+
 test('a Codex account shows the real name, email and plan from its own sign-in, without exposing tokens', async () => {
   await fetch(`${main.base}/api/accounts`, { method: 'POST', headers: authed(), body: JSON.stringify({ id: 'cx-identity', provider: 'codex' }) });
   const home = path.join(main.accountsDir, 'cx-identity', 'codex');
@@ -1102,6 +1115,13 @@ test('an Antigravity account shows the real Google name and photo, and an upload
     assert.strictEqual(custom.subarray(8, 12).toString('ascii'), 'WEBP');
     const removed = await (await fetch(`${instance.base}/api/accounts/agy-identity/avatar`, { method: 'DELETE', headers: authed() })).json();
     assert.ok(Buffer.from(await (await fetch(instance.base + removed.account.avatarUrl)).arrayBuffer()).equals(TINY_PNG));
+
+    fs.writeFileSync(path.join(cli, 'antigravity-oauth-token'), JSON.stringify({
+      token: { access_token: 'SECRET-ACCESS-AGY', expiry: new Date(Date.now() - 60000).toISOString() },
+      id_token_email: 'grace@example.com'
+    }));
+    const later = (await (await fetch(`${instance.base}/api/accounts/agy-identity/check`, { method: 'POST', headers: authed() })).json()).account;
+    assert.strictEqual(later.identity.name, 'Grace Hopper', 'a check made after the access token expired erased the name');
   } finally {
     google.close();
   }

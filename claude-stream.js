@@ -40,7 +40,7 @@ function createStreamParser({ onText, onLog, onInit, onResult, onRateLimit }) {
       const rawIn = Number(u.input_tokens) || 0;
       const cacheCreation = Number(u.cache_creation_input_tokens) || 0;
       const cacheRead = Number(u.cache_read_input_tokens) || 0;
-      const input_tokens = rawIn + cacheCreation + cacheRead;
+      const input_tokens = rawIn + cacheCreation;
       const output_tokens = Number(u.output_tokens) || 0;
       const details = u.output_tokens_details || {};
       const thinking_tokens = Number(details.thinking_tokens) || 0;
@@ -62,11 +62,10 @@ function createStreamParser({ onText, onLog, onInit, onResult, onRateLimit }) {
         for (const [mName, mu] of Object.entries(event.modelUsage)) {
           if (!mu || typeof mu !== 'object') continue;
           const inTok = Number(mu.inputTokens) || 0;
-          const crTok = Number(mu.cacheReadInputTokens) || 0;
           const ccTok = Number(mu.cacheCreationInputTokens) || 0;
           const outTok = Number(mu.outputTokens) || 0;
           models[mName] = {
-            total_tokens: inTok + crTok + ccTok + outTok,
+            total_tokens: inTok + ccTok + outTok,
             cost_usd: typeof mu.costUSD === 'number' ? mu.costUSD : (Number(mu.costUSD) || 0)
           };
         }

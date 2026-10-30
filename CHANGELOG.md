@@ -43,6 +43,10 @@ All notable changes to a2a-panel are listed here. The format follows [Keep a Cha
 - A task on a signed-out Antigravity account no longer waits at agy's sign-in prompt until the time limit.
 - A running verification command can be cancelled.
 - Antigravity sign-in from the panel runs agy's local `/help` command instead of a model prompt, so it uses no tokens and finishes a few seconds after the code is pasted; the dialog shows that the code was sent and can't send it twice.
+- Antigravity accounts show the Google name and photo: the sign-in is read from the keychain entry agy really uses, and the newest stored sign-in wins over an old token file; a later check with an expired token keeps the name.
+- Claude Code accounts show the Claude display name from their own `.claude.json`.
+- Token totals mean the same for every CLI (new input plus output, cache reads separate); Claude Code and Codex totals no longer include cache reads.
+- An account that reuses a deleted account's id no longer inherits its usage or budget spend.
 - Sign-in codes are hidden from sign-in output for every provider; a sign-in that ignores SIGTERM is killed; a missing CLI no longer stops the server.
 - Codex keeps showing signed out after a task proves its stored sign-in was rejected, until you sign in again.
 - Leader-written verification commands run on the host only after explicit plan approval in plan-first mode, preventing untrusted command execution.

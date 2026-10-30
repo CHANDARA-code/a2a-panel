@@ -89,7 +89,7 @@ function createStreamParser({ onText, onLog, onInit, onResult, onRateLimit }) {
       if (!emittedResult) {
         emittedResult = true;
         const isSuccess = seenTurnCompleted && !seenTurnFailed && !seenError;
-        const input_tokens = totalInputTokens;
+        const input_tokens = Math.max(0, totalInputTokens - totalCachedInputTokens);
         const output_tokens = totalOutputTokens;
         const thinking_tokens = totalReasoningTokens;
         const cache_read_tokens = totalCachedInputTokens;
