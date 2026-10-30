@@ -1107,6 +1107,43 @@ test('an Antigravity account shows the real Google name and photo, and an upload
   }
 });
 
+test('an Antigravity sign-in kept in the account keychain shows the Google name, and the newest stored sign-in wins', { skip: process.platform !== 'darwin' }, async () => {
+  const google = http.createServer((req, res) => {
+    if (req.url === '/userinfo' && req.headers.authorization === 'Bearer SECRET-ACCESS-KEYCHAIN') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ name: 'Katherine Johnson', email: 'katherine@example.com' }));
+    }
+    res.writeHead(401);
+    res.end();
+  });
+  await new Promise((resolve) => google.listen(0, '127.0.0.1', resolve));
+  try {
+    const instance = await startInstance({ A2A_GOOGLE_USERINFO_URL: `http://127.0.0.1:${google.address().port}/userinfo` });
+    await fetch(`${instance.base}/api/accounts`, { method: 'POST', headers: authed(), body: JSON.stringify({ id: 'agy-keychain', provider: 'agy' }) });
+    await fetch(`${instance.base}/api/accounts/agy-keychain/check`, { method: 'POST', headers: authed() });
+    const home = path.join(instance.accountsDir, 'agy-keychain', 'home');
+    const cli = path.join(home, '.gemini', 'antigravity-cli');
+    fs.mkdirSync(cli, { recursive: true });
+    fs.writeFileSync(path.join(cli, '.signed-in'), 'ok\n');
+    fs.writeFileSync(path.join(cli, 'antigravity-oauth-token'), JSON.stringify({
+      token: { access_token: 'SECRET-ACCESS-STALE', expiry: new Date(Date.now() - 86400000).toISOString() },
+      id_token_email: 'old@example.com'
+    }));
+    const stored = JSON.stringify({
+      token: { access_token: 'SECRET-ACCESS-KEYCHAIN', expiry: new Date(Date.now() + 3600000).toISOString() },
+      auth_method: 'oauth',
+      id_token_email: 'katherine@example.com'
+    });
+    execFileSync('/usr/bin/security', ['add-generic-password', '-s', 'gemini', '-a', 'katherine', '-w', `go-keyring-base64:${Buffer.from(stored).toString('base64')}`, path.join(home, 'Library', 'Keychains', 'login.keychain-db')], { env: { ...process.env, HOME: home }, stdio: 'ignore' });
+
+    const account = (await (await fetch(`${instance.base}/api/accounts/agy-keychain/check`, { method: 'POST', headers: authed() })).json()).account;
+    assert.strictEqual(account.identity.name, 'Katherine Johnson');
+    assert.strictEqual(account.identity.email, 'katherine@example.com');
+  } finally {
+    google.close();
+  }
+});
+
 async function signedInClaude(instance, id) {
   await fetch(`${instance.base}/api/accounts`, { method: 'POST', headers: authed(), body: JSON.stringify({ id, provider: 'claude' }) });
   const dir = path.join(instance.accountsDir, id, 'claude');

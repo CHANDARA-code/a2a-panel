@@ -7,6 +7,7 @@ const GOOGLE_USERINFO_URL = process.env.A2A_GOOGLE_USERINFO_URL || 'https://www.
 const TEST_PICTURE_HOSTS = (process.env.A2A_PICTURE_HOSTS || '').split(',').map((host) => host.trim()).filter(Boolean);
 const PICTURE_HOST_SUFFIXES = ['.googleusercontent.com'];
 const MAX_PICTURE_BYTES = 512 * 1024;
+const AGY_KEYCHAIN_SERVICE = 'gemini';
 const TIMEOUT_MS = 5000;
 
 function decodeJwtPayload(jwt) {
@@ -47,13 +48,10 @@ function decodeKeyringValue(value) {
   return value;
 }
 
-function agyStoredSignIn(home) {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(home, '.gemini', 'antigravity-cli', 'antigravity-oauth-token'), 'utf-8'));
-  } catch (err) {}
+function agyKeychainSignIn(home) {
   if (process.platform !== 'darwin') return null;
   try {
-    const value = execFileSync('/usr/bin/security', ['find-generic-password', '-s', 'antigravity', '-w'], {
+    const value = execFileSync('/usr/bin/security', ['find-generic-password', '-s', AGY_KEYCHAIN_SERVICE, '-w'], {
       env: { ...process.env, HOME: home },
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
@@ -63,6 +61,23 @@ function agyStoredSignIn(home) {
   } catch (err) {
     return null;
   }
+}
+
+function agyFileSignIn(home) {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(home, '.gemini', 'antigravity-cli', 'antigravity-oauth-token'), 'utf-8'));
+  } catch (err) {
+    return null;
+  }
+}
+
+function tokenExpiry(stored) {
+  return Date.parse(stored && stored.token && stored.token.expiry) || 0;
+}
+
+function agyStoredSignIn(home) {
+  const found = [agyKeychainSignIn(home), agyFileSignIn(home)].filter(Boolean);
+  return found.sort((a, b) => tokenExpiry(b) - tokenExpiry(a))[0] || null;
 }
 
 async function agyIdentity(home) {
