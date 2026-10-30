@@ -19,6 +19,7 @@ const RESERVED_IDS = new Set(['none', 'default']);
 const EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
 const MODEL_PATTERN = /^[A-Za-z0-9][\w.:-]{0,63}$/;
 const RUN_ID_PATTERN = /^run_\d+_[a-z0-9]+$/;
+const UNFINISHED_RUN_STATUSES = new Set(['planning', 'planned', 'running', 'reviewing']);
 const activeRuns = new Map();
 
 function assertValidRunId(runId) {
@@ -300,11 +301,30 @@ function updateTeam(id, body) {
 
 function deleteTeam(id) {
   const existing = getTeam(id);
+  const live = listRuns({ teamId: id, limit: Infinity }).find((run) => UNFINISHED_RUN_STATUSES.has(run.status) && isPidAlive(run.pid));
+  if (live) {
+    throw new TeamError(`Team "${id}" has an unfinished run (${live.id} is ${live.status}). Cancel it or wait for it to finish first.`, 409);
+  }
   const file = teamFile(id);
   if (fs.existsSync(file)) {
     fs.unlinkSync(file);
   }
   return existing;
+}
+
+function teamSnapshot(team) {
+  return {
+    name: team.name,
+    leader: {
+      account: team.leader.account,
+      model: team.leader.model || null,
+      effort: team.leader.effort
+    },
+    members: team.members.map((m) => ({ account: m.account, roles: m.roles || [] })),
+    preset: team.preset || null,
+    maxParallel: team.maxParallel || 1,
+    review: Boolean(team.review)
+  };
 }
 
 function teamsUsingAccount(accountId) {
@@ -565,6 +585,14 @@ function getRawRun(runId) {
       if (diskData && diskData.status === 'cancelled' && memRun.status !== 'cancelled') {
         memRun.status = 'cancelled';
         memRun.finishedAt = diskData.finishedAt || new Date().toISOString();
+        for (const task of memRun.tasks || []) {
+          const onDisk = (diskData.tasks || []).find((t) => t.id === task.id);
+          if (onDisk && onDisk.status === 'cancelled' && (task.status === 'pending' || task.status === 'running')) {
+            task.status = 'cancelled';
+            task.finishedAt = onDisk.finishedAt || memRun.finishedAt;
+          }
+        }
+        if (memRun.review && diskData.review && diskData.review.status === 'cancelled') memRun.review.status = 'cancelled';
       }
     } catch (err) {}
     return memRun;
@@ -628,6 +656,7 @@ function startRun({ teamId, goal, workspace, mode = 'plan' }) {
     id: runId,
     teamId: team.id,
     teamName: team.name,
+    team: teamSnapshot(team),
     goal: goal.trim(),
     workspace: targetWorkspace,
     mode,
@@ -665,10 +694,10 @@ function startRun({ teamId, goal, workspace, mode = 'plan' }) {
       model: team.leader.model || undefined,
       preset: 'none',
       onDone: (taskRecord) => {
-        handleLeaderPlanningDone(runId, taskRecord);
+        guardRun(runId, () => handleLeaderPlanningDone(runId, taskRecord));
       },
       onError: (err) => {
-        handleLeaderPlanningError(runId, err);
+        guardRun(runId, () => handleLeaderPlanningError(runId, err));
       }
     });
     run.leader.taskId = leaderProc.taskId;
@@ -717,8 +746,7 @@ function handleLeaderPlanningDone(runId, taskRecord) {
 
   let tasks;
   try {
-    const team = getTeam(run.teamId);
-    tasks = validatePlanTasks(plan, team);
+    tasks = validatePlanTasks(plan, run.team);
   } catch (err) {
     run.status = 'failed';
     run.error = `Invalid plan from leader: ${err.message}`;
@@ -734,6 +762,7 @@ function handleLeaderPlanningDone(runId, taskRecord) {
   if (run.mode === 'plan') {
     run.status = 'planned';
     atomicWriteJson(runFile(runId), run);
+    activeRuns.delete(runId);
     return;
   }
 
@@ -752,28 +781,70 @@ function handleLeaderPlanningError(runId, err) {
   activeRuns.delete(runId);
 }
 
+const STALE_CLAIM_MS = 30000;
+
+function claimRun(file, waitMs) {
+  const claim = `${file}.execute-claim`;
+  const deadline = Date.now() + waitMs;
+  for (;;) {
+    try {
+      fs.mkdirSync(claim);
+      return claim;
+    } catch (err) {
+      if (err.code !== 'EEXIST') throw new TeamError(`Could not claim run: ${err.message}`, 500);
+    }
+    try {
+      if (Date.now() - fs.statSync(claim).mtimeMs > STALE_CLAIM_MS) {
+        fs.rmdirSync(claim);
+        continue;
+      }
+    } catch (err) {
+      continue;
+    }
+    if (Date.now() >= deadline) return null;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+  }
+}
+
+function releaseClaim(claim) {
+  if (!claim) return;
+  try { fs.rmdirSync(claim); } catch (err) {}
+}
+
 function executeRun(runId) {
   assertValidRunId(runId);
-  const run = getRawRun(runId);
-  if (!run) throw new TeamError(`Run "${runId}" not found`, 404);
-  if (run.status !== 'planned') {
-    throw new TeamError(`Cannot execute run with status "${run.status}" (must be "planned")`, 409);
+  const file = runFile(runId);
+  const claim = claimRun(file, 0);
+  if (!claim) throw new TeamError(`Run "${runId}" is already being executed`, 409);
+  let run;
+  try {
+    run = readJsonFile(file);
+    if (!run) throw new TeamError(`Run "${runId}" not found`, 404);
+    if (run.status !== 'planned') {
+      throw new TeamError(`Cannot execute run with status "${run.status}" (must be "planned")`, 409);
+    }
+    run.team = run.team || teamSnapshot(getTeam(run.teamId));
+    run.status = 'running';
+    run.planApproved = true;
+    run.pid = process.pid;
+    atomicWriteJson(file, run);
+  } finally {
+    releaseClaim(claim);
   }
   activeRuns.set(runId, run);
-  run.status = 'running';
-  run.planApproved = true;
-  run.pid = process.pid;
-  atomicWriteJson(runFile(runId), run);
-  scheduleTasks(runId);
+  guardRun(runId, () => scheduleTasks(runId));
   return formatRun(run);
 }
 
 function scheduleTasks(runId) {
   const run = getRawRun(runId);
-  if (!run || run.status === 'cancelled') return;
+  if (!run) return;
+  if (run.status !== 'running') {
+    if (run.status === 'cancelled' && !run.tasks.some((t) => t.status === 'running')) activeRuns.delete(runId);
+    return;
+  }
 
-  const team = getTeam(run.teamId);
-  const maxParallel = team.maxParallel || 1;
+  const maxParallel = run.team.maxParallel || 1;
 
   let changed = true;
   while (changed) {
@@ -796,27 +867,22 @@ function scheduleTasks(runId) {
     }
   }
 
-  const runningCount = run.tasks.filter((t) => t.status === 'running').length;
-  let slots = maxParallel - runningCount;
+  for (const task of run.tasks) {
+    if (run.status !== 'running') break;
+    if (run.tasks.filter((t) => t.status === 'running').length >= maxParallel) break;
+    if (task.status !== 'pending') continue;
 
-  if (slots > 0) {
-    for (const task of run.tasks) {
-      if (slots <= 0) break;
-      if (task.status !== 'pending') continue;
+    const depsReady = (task.depends_on || []).every((depId) => {
+      const dep = run.tasks.find((t) => t.id === depId);
+      return dep && dep.status === 'completed';
+    });
 
-      const depsReady = (task.depends_on || []).every((depId) => {
-        const dep = run.tasks.find((t) => t.id === depId);
-        return dep && dep.status === 'completed';
-      });
+    if (!depsReady) continue;
 
-      if (!depsReady) continue;
+    task.status = 'running';
+    task.startedAt = new Date().toISOString();
 
-      task.status = 'running';
-      task.startedAt = new Date().toISOString();
-      slots--;
-
-      startTaskExecution(runId, task);
-    }
+    startTaskExecution(runId, task);
   }
 
   atomicWriteJson(runFile(runId), run);
@@ -830,7 +896,7 @@ function scheduleTasks(runId) {
 function startTaskExecution(runId, task) {
   const currentRun = getRawRun(runId);
   if (!currentRun || currentRun.status === 'cancelled') return;
-  const team = getTeam(currentRun.teamId);
+  const team = currentRun.team;
   const devPrompt = buildDevPrompt(team, currentRun, task);
 
   try {
@@ -845,10 +911,10 @@ function startTaskExecution(runId, task) {
       acceptance_criteria: task.acceptance_criteria,
       verification_command: currentRun.planApproved ? task.verification_command : undefined,
       onDone: (taskRecord) => {
-        handleTaskDone(runId, task.id, taskRecord);
+        guardRun(runId, () => handleTaskDone(runId, task.id, taskRecord));
       },
       onError: (err) => {
-        handleTaskError(runId, task.id, err);
+        guardRun(runId, () => handleTaskError(runId, task.id, err));
       }
     });
     task.taskId = proc.taskId;
@@ -858,7 +924,7 @@ function startTaskExecution(runId, task) {
       task.status = 'pending';
       task.startedAt = null;
       atomicWriteJson(runFile(runId), currentRun);
-      setTimeout(() => scheduleTasks(runId), 5000).unref();
+      setTimeout(() => guardRun(runId, () => scheduleTasks(runId)), 5000).unref();
       return;
     }
     task.status = 'failed';
@@ -906,10 +972,9 @@ function handleTaskError(runId, taskId, err) {
 
 function checkReviewOrFinish(runId) {
   const run = getRawRun(runId);
-  if (!run) return;
-  if (run.status === 'cancelled') return;
+  if (!run || run.status !== 'running') return;
 
-  const team = getTeam(run.teamId);
+  const team = run.team;
   const anyCompleted = run.tasks.some((t) => t.status === 'completed');
 
   if (team.review && anyCompleted && !run.review) {
@@ -931,25 +996,29 @@ function checkReviewOrFinish(runId) {
         model: team.leader.model || undefined,
         preset: 'none',
         onDone: (revRecord) => {
-          const fresh = getRawRun(runId);
-          if (!fresh) return;
-          fresh.review = {
-            taskId: revRecord.id,
-            status: revRecord.status,
-            output: (revRecord.output || '').slice(-4000)
-          };
-          fresh.usage.total_tokens = (fresh.usage.total_tokens || 0) + (revRecord.usage?.total_tokens || 0);
-          finalizeRun(fresh);
+          guardRun(runId, () => {
+            const fresh = getRawRun(runId);
+            if (!fresh) return;
+            fresh.review = {
+              taskId: revRecord.id,
+              status: revRecord.status,
+              output: (revRecord.output || '').slice(-4000)
+            };
+            fresh.usage.total_tokens = (fresh.usage.total_tokens || 0) + (revRecord.usage?.total_tokens || 0);
+            finalizeRun(fresh);
+          });
         },
         onError: (err) => {
-          const fresh = getRawRun(runId);
-          if (!fresh) return;
-          fresh.review = {
-            taskId: null,
-            status: 'failed',
-            output: err.message
-          };
-          finalizeRun(fresh);
+          guardRun(runId, () => {
+            const fresh = getRawRun(runId);
+            if (!fresh) return;
+            fresh.review = {
+              taskId: null,
+              status: 'failed',
+              output: err.message
+            };
+            finalizeRun(fresh);
+          });
         }
       });
       run.review = {
@@ -976,7 +1045,7 @@ function checkReviewOrFinish(runId) {
 function finalizeRun(run) {
   if (run.status === 'cancelled') {
     run.finishedAt = new Date().toISOString();
-  } else {
+  } else if (run.status === 'running' || run.status === 'reviewing') {
     const allCompleted = run.tasks.length > 0 && run.tasks.every((t) => t.status === 'completed');
     if (allCompleted) {
       run.status = 'completed';
@@ -992,8 +1061,38 @@ function finalizeRun(run) {
   activeRuns.delete(run.id);
 }
 
+function failRun(runId, err) {
+  try {
+    const run = getRawRun(runId);
+    if (run && UNFINISHED_RUN_STATUSES.has(run.status)) {
+      run.status = 'failed';
+      run.error = `Team run stopped by an unexpected error: ${err.message}`;
+      run.finishedAt = new Date().toISOString();
+      atomicWriteJson(runFile(runId), run);
+    }
+  } catch (recordErr) {}
+  activeRuns.delete(runId);
+}
+
+function guardRun(runId, fn) {
+  try {
+    fn();
+  } catch (err) {
+    failRun(runId, err);
+  }
+}
+
 function cancelRun(runId) {
   assertValidRunId(runId);
+  const claim = claimRun(runFile(runId), 2000);
+  try {
+    return cancelClaimedRun(runId);
+  } finally {
+    releaseClaim(claim);
+  }
+}
+
+function cancelClaimedRun(runId) {
   const run = getRawRun(runId);
   if (!run) throw new TeamError(`Run "${runId}" not found`, 404);
 

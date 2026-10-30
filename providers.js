@@ -176,7 +176,7 @@ function logoutArgs(providerId) {
 
 function authFailurePattern(providerId) {
   if (providerId === 'agy') return /please sign in|not signed in|authentication required|authentication failed or timed out/i;
-  if (providerId === 'claude') return /not logged in|please run \/login|invalid api key|oauth token has expired|authentication_error/i;
+  if (providerId === 'claude') return /please run \/login|authentication_error|oauth token has expired/i;
   if (providerId === 'codex') return /access token could not be refreshed|not logged in|please log out and sign in again|401 unauthorized/i;
   return /$^/;
 }

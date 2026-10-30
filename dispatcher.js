@@ -278,6 +278,8 @@ function loadRolePersona(role) {
 const USAGE_LOG = path.join(LOGS_DIR, 'usage.jsonl');
 const CONVERSATION_ID_PATTERN = /^[A-Za-z0-9][\w-]{7,63}$/;
 const MODEL_PATTERN = /^[A-Za-z0-9][\w.:-]{0,63}$/;
+const TASK_MODES = ['accept-edits', 'plan', 'auto'];
+const TASK_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 const CHANGES_LIMIT = 2000;
 const VERIFY_OUTPUT_LIMIT = 4000;
 
@@ -457,6 +459,12 @@ function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = '
   if (model && !MODEL_PATTERN.test(model)) {
     throw new Error('Invalid model name');
   }
+  if (!TASK_MODES.includes(mode)) {
+    throw new Error(`Unsupported mode ${JSON.stringify(mode)}. Use "plan" (read-only), "accept-edits" or "auto".`);
+  }
+  if (!TASK_EFFORTS.includes(effort)) {
+    throw new Error(`Unsupported effort ${JSON.stringify(effort)}. Use ${TASK_EFFORTS.join(', ')}.`);
+  }
   const { wallMs, idleMs, maxConcurrent, maxOutputChars } = limits();
   pruneOldLogs();
   if (maxConcurrent > 0) {
@@ -484,6 +492,9 @@ function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = '
   }
   const provider = resolvedAcc.provider;
   const effectiveModel = model || resolvedAcc.model || null;
+  if (effectiveModel && !MODEL_PATTERN.test(effectiveModel)) {
+    throw new Error(`Invalid model name on account ${resolvedAcc.id}`);
+  }
 
   const { finalPrompt, preferences } = buildTaskPrompt({ role, prompt, workspace: targetCwd, preset, acceptance_criteria, verification_command, persona });
 

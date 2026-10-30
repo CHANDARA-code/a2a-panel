@@ -417,9 +417,11 @@ a2a-panel accounts check my-claude     # check sign-in status against provider C
 a2a-panel accounts budget my-claude --period day --tokens 50000 --stop
 a2a-panel accounts budget my-claude --clear
 a2a-panel accounts logout my-claude    # sign out
-a2a-panel accounts delete my-claude    # remove account and its profile folder
+a2a-panel accounts delete my-claude    # sign the account out, then remove its folder
 a2a-panel usage --days 30              # token usage totals, quota windows and budgets
 ```
+
+The built-in accounts `agy`, `claude` and `codex` are the sign-ins those tools use on this computer, also outside a2a-panel. Signing one of them in or out replaces that sign-in, so the CLI asks for `--yes` (`a2a-panel accounts login claude --yes`) and the panel asks for confirmation. To add another account next to it, use `accounts add` or **Add account** instead.
 
 ## 7. Teams
 

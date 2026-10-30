@@ -63,17 +63,22 @@ function workspaceError(workspace) {
   return null;
 }
 
+function clip(text, max) {
+  const value = String(text || '').replace(/\s+/g, ' ').trim();
+  return value.length > max ? `${value.slice(0, max - 1)}…` : value;
+}
+
 function formatTeamRunSummary(run) {
   const lines = [
     `[A2A TEAM RUN] ${run.teamName || run.teamId} | Status: ${run.status.toUpperCase()} | Run: ${run.id}`,
     `Leader: ${run.leader?.account || 'unknown'} | Tokens: ${run.usage?.total_tokens || 0}`
   ];
   if (run.summary) {
-    lines.push(`Plan: ${run.summary}`);
+    lines.push(`Plan: ${clip(run.summary, 1000)}`);
   }
   if (run.tasks && run.tasks.length > 0) {
     for (const t of run.tasks) {
-      lines.push(`- ${t.id} ${t.title} -> ${t.assignee} (${t.role}): ${t.status}${t.error ? ': ' + t.error : ''}`);
+      lines.push(`- ${t.id} ${clip(t.title, 120)} -> ${t.assignee} (${t.role}): ${t.status}${t.error ? ': ' + clip(t.error, 300) : ''}`);
     }
   }
   if (run.review && run.review.output) {

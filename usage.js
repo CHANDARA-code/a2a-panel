@@ -33,7 +33,7 @@ function readUsageRecords() {
     if (!line.trim()) continue;
     try {
       const record = JSON.parse(line);
-      records.push(record);
+      records.push({ ...record, account: record.account || 'agy', provider: record.provider || 'agy' });
     } catch (err) {}
   }
   return records;
@@ -324,7 +324,7 @@ function findCodexRolloutRateLimits(account, conversationId) {
   if (account.system) {
     codexHome = process.env.CODEX_HOME || path.join(process.env.HOME || '', '.codex');
   } else {
-    codexHome = process.env.CODEX_HOME || accountFolder(account);
+    codexHome = accountFolder(account);
   }
   const pad = (n) => String(n).padStart(2, '0');
   const now = new Date();

@@ -709,3 +709,31 @@ test('CLI usage per account and accounts budget', () => {
   });
   assert(clearOut.includes('Cleared budget for account "claude-quota-acc"'));
 });
+
+test('usage records written before accounts existed count for the default Antigravity account', async () => {
+  const instance = await startInstance();
+  fs.mkdirSync(instance.logsDir, { recursive: true });
+  fs.appendFileSync(path.join(instance.logsDir, 'usage.jsonl'), JSON.stringify({ at: new Date().toISOString(), taskId: 'a2a_1_legacy', role: 'web-engineer', status: 'completed', model: null, usage: { total_tokens: 4321 } }) + '\n');
+  const report = await (await fetch(`${instance.base}/api/usage/accounts?days=7`)).json();
+  const agy = report.accounts.find((a) => a.id === 'agy');
+  assert.strictEqual(agy.today.total_tokens, 4321);
+  assert.strictEqual(agy.totals.tasks, 1);
+  const budget = await fetch(`${instance.base}/api/accounts/agy/budget`, { method: 'PUT', headers: authed(), body: JSON.stringify({ period: 'day', tokens: 1000, stop: true }) });
+  assert.strictEqual((await budget.json()).account.budgetUsed.tokens, 4321);
+});
+
+test('Codex quota is read from the account folder even when CODEX_HOME is set for the server', async () => {
+  const instance = await startInstance({ CODEX_HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'a2a-other-codex-home-')) });
+  await fetch(`${instance.base}/api/accounts`, { method: 'POST', headers: authed(), body: JSON.stringify({ id: 'codex-home-acc', provider: 'codex' }) });
+  const accDir = path.join(instance.accountsDir, 'codex-home-acc', 'codex');
+  fs.mkdirSync(accDir, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(path.join(accDir, '.codex-mode'), 'quota');
+  const { taskId } = await (await fetch(`${instance.base}/api/tasks`, {
+    method: 'POST',
+    headers: authed(),
+    body: JSON.stringify({ role: 'test-engineer', prompt: 'quota with CODEX_HOME set', workspace: instance.workspace, account: 'codex-home-acc' })
+  })).json();
+  await waitFor(async () => ['completed', 'failed', 'cancelled'].includes((await (await fetch(`${instance.base}/api/tasks/${taskId}`)).json()).task?.status));
+  const acc = (await (await fetch(`${instance.base}/api/accounts`)).json()).accounts.find((a) => a.id === 'codex-home-acc');
+  assert.ok(acc.limits && acc.limits.windows.length === 2, JSON.stringify(acc.limits));
+});

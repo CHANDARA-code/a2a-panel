@@ -24,6 +24,18 @@ All notable changes to a2a-panel are listed here. The format follows [Keep a Cha
 
 ### Fixed
 
+- A team plan approved in one place (panel, CLI or Claude Code) shows as built everywhere and can only be built once; cancelling and building the same plan at the same moment cannot both win.
+- Deleting a team that is running is refused, and a run no longer crashes its process when its team changes or an error happens while a task finishes.
+- A run finishes only after its review ends, and the parallel limit holds even when a task cannot start.
+- Cancelling a run from another process keeps all of its tasks cancelled.
+- Unknown task modes and efforts are refused everywhere (REST, JSON-RPC, MCP, CLI) instead of running Claude or Codex with full permissions; an account's saved model is validated too.
+- Signing a built-in account in again asks for confirmation in the panel and `--yes` in the CLI, because it replaces the sign-in that tool uses on this computer; never-checked accounts are checked when the Accounts page opens.
+- Deleting a Claude or Codex account signs it out first, so Claude's keychain entry for that account is removed too.
+- A status check no longer overwrites a rename or budget made while it ran; `a2a-panel accounts login` keeps the new status.
+- Sign-out reports a failure instead of marking the account signed out, and no longer blocks the server.
+- Usage recorded before accounts existed counts for the default Antigravity account in the Usage page and budgets; Codex quota is read from the account's folder even when `CODEX_HOME` is set.
+- Sign-in processes are stopped when the server stops; closing the dialog during a Terminal-window sign-in keeps the new account.
+- Claude sign-in failures are recognised only by Claude's own error wording, so a task's text cannot sign an account out.
 - A task on a signed-out Antigravity account no longer waits at agy's sign-in prompt until the time limit.
 - A running verification command can be cancelled.
 - Sign-in codes are hidden from sign-in output for every provider; a sign-in that ignores SIGTERM is killed; a missing CLI no longer stops the server.

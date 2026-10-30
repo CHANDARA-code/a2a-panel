@@ -1101,3 +1101,105 @@ test('an Antigravity account shows the real Google name and photo, and an upload
     google.close();
   }
 });
+
+async function signedInClaude(instance, id) {
+  await fetch(`${instance.base}/api/accounts`, { method: 'POST', headers: authed(), body: JSON.stringify({ id, provider: 'claude' }) });
+  const dir = path.join(instance.accountsDir, id, 'claude');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, '.signed-in'), 'ok\n');
+  return dir;
+}
+
+test('an unknown mode or effort is refused instead of running with full permissions', async () => {
+  await signedInClaude(main, 'c-mode');
+  fs.writeFileSync(main.argsFile, '');
+  const rest = await fetch(`${main.base}/tasks/send`, { method: 'POST', headers: authed(), body: JSON.stringify({ prompt: 'read the code', workspace: main.workspace, account: 'c-mode', mode: 'read-only', async: true }) });
+  assert.ok(rest.status >= 400);
+  assert.match(JSON.stringify(await rest.json()), /Unsupported mode/);
+  const rpc = await fetch(`${main.base}/rpc`, { method: 'POST', headers: authed(), body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'message/send', params: { prompt: 'read the code', workspace: main.workspace, account: 'c-mode', effort: '--dangerously-skip-permissions', async: true } }) });
+  assert.match(JSON.stringify(await rpc.json()), /Unsupported effort/);
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  assert.ok(!fs.readFileSync(main.argsFile, 'utf-8').includes('ARGV'), 'a Claude process was started');
+});
+
+test('changes made while a status check runs are kept', async () => {
+  const instance = await startInstance({ FAKE_CLAUDE_STATUS_DELAY: '1' });
+  await signedInClaude(instance, 'c-race');
+  const checking = fetch(`${instance.base}/api/accounts/c-race/check`, { method: 'POST', headers: authed() });
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  await fetch(`${instance.base}/api/accounts/c-race`, { method: 'PUT', headers: authed(), body: JSON.stringify({ label: 'Renamed during check' }) });
+  await fetch(`${instance.base}/api/accounts/c-race/budget`, { method: 'PUT', headers: authed(), body: JSON.stringify({ period: 'day', tokens: 5000, stop: true }) });
+  assert.strictEqual((await (await checking).json()).account.status.state, 'signed-in');
+  const account = await accountOf(instance, 'c-race');
+  assert.strictEqual(account.label, 'Renamed during check');
+  assert.deepStrictEqual(account.budget, { period: 'day', tokens: 5000, stop: true });
+});
+
+function runCli(instance, args, input = '') {
+  return require('node:child_process').spawnSync(process.execPath, [path.join(ROOT, 'cli.js'), ...args], {
+    input,
+    encoding: 'utf-8',
+    timeout: 30000,
+    env: { ...process.env, A2A_ACCOUNTS_DIR: instance.accountsDir, A2A_LOGS_DIR: instance.logsDir, A2A_PRESETS_DIR: instance.presetsDir, A2A_REAL_HOME: instance.realHome, AGY_BIN: FAKE_AGY, CLAUDE_BIN: FAKE_CLAUDE, CODEX_BIN: FAKE_CODEX, FAKE_ARGS_FILE: instance.argsFile }
+  });
+}
+
+test('the CLI login keeps the new status, and refuses a default account without --yes', async () => {
+  await fetch(`${main.base}/api/accounts`, { method: 'POST', headers: authed(), body: JSON.stringify({ id: 'c-cli', provider: 'claude' }) });
+  const result = runCli(main, ['accounts', 'login', 'c-cli'], 'good-code\n');
+  assert.strictEqual(result.status, 0, result.stderr);
+  const stored = await accountOf(main, 'c-cli');
+  assert.strictEqual(stored.status.state, 'signed-in');
+  assert.strictEqual(stored.signedInHere, true);
+  fs.writeFileSync(main.argsFile, '');
+  const guarded = runCli(main, ['accounts', 'login', 'claude']);
+  assert.notStrictEqual(guarded.status, 0);
+  assert.match(guarded.stderr, /--yes/);
+  assert.ok(!fs.readFileSync(main.argsFile, 'utf-8').includes('auth login'), 'the default sign-in was started');
+});
+
+test('a failed sign-out reports the error and keeps the account signed in', async () => {
+  const dir = await signedInClaude(main, 'c-logout');
+  fs.writeFileSync(path.join(dir, '.logout-fail'), '');
+  await fetch(`${main.base}/api/accounts/c-logout/check`, { method: 'POST', headers: authed() });
+  const res = await fetch(`${main.base}/api/accounts/c-logout/logout`, { method: 'POST', headers: authed() });
+  assert.strictEqual(res.status, 502);
+  assert.match((await res.json()).error, /keychain is locked/);
+  assert.strictEqual((await accountOf(main, 'c-logout')).status.state, 'signed-in');
+});
+
+test('deleting a Claude account signs out only that account first', async () => {
+  const dir = await signedInClaude(main, 'c-delete');
+  fs.writeFileSync(main.argsFile, '');
+  assert.strictEqual((await fetch(`${main.base}/api/accounts/c-delete`, { method: 'DELETE', headers: authed() })).status, 200);
+  const logouts = fs.readFileSync(main.argsFile, 'utf-8').split('\n').filter((line) => line.startsWith('LOGOUT: '));
+  assert.deepStrictEqual(logouts, [`LOGOUT: ${dir}`]);
+});
+
+test('an account model that could act as a flag is refused', async () => {
+  const bad = await fetch(`${main.base}/api/accounts`, { method: 'POST', headers: authed(), body: JSON.stringify({ id: 'c-model', provider: 'claude', model: '--dangerously-skip-permissions' }) });
+  assert.strictEqual(bad.status, 400);
+  await fetch(`${main.base}/api/accounts`, { method: 'POST', headers: authed(), body: JSON.stringify({ id: 'c-model', provider: 'claude', model: 'opus' }) });
+  const update = await fetch(`${main.base}/api/accounts/c-model`, { method: 'PUT', headers: authed(), body: JSON.stringify({ model: '-x' }) });
+  assert.strictEqual(update.status, 400);
+  assert.strictEqual((await accountOf(main, 'c-model')).model, 'opus');
+});
+
+test('sign-in words in Claude’s final error text do not sign the account out', async () => {
+  const dir = await signedInClaude(main, 'c-prose-final');
+  fs.writeFileSync(path.join(dir, '.claude-mode'), 'prose-final');
+  const res = await fetch(`${main.base}/api/tasks`, { method: 'POST', headers: authed(), body: JSON.stringify({ role: 'test-engineer', prompt: 'debug the login page', workspace: main.workspace, mode: 'plan', account: 'c-prose-final' }) });
+  const task = await finishedTask(main, (await res.json()).taskId);
+  assert.strictEqual(task.status, 'failed');
+  assert.notStrictEqual((await accountOf(main, 'c-prose-final')).status.state, 'signed-out');
+});
+
+test('stopping the server also stops its sign-in processes', async () => {
+  const seconds = String(400 + Math.floor(Math.random() * 500));
+  const instance = await startInstance({ FAKE_CODEX_LOGIN_STUBBORN: seconds });
+  await fetch(`${instance.base}/api/accounts`, { method: 'POST', headers: authed(), body: JSON.stringify({ id: 'cx-exit', provider: 'codex' }) });
+  await fetch(`${instance.base}/api/accounts/cx-exit/login`, { method: 'POST', headers: authed(), body: JSON.stringify({ method: 'device' }) });
+  await waitFor(() => runningCommands().includes(`sleep ${seconds}`));
+  instance.proc.kill('SIGTERM');
+  await waitFor(() => !runningCommands().includes(`sleep ${seconds}`));
+});

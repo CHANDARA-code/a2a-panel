@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, App as AntApp, Button, Card, Collapse, Dropdown, Empty, Flex, Form, Input, Modal, Select, Skeleton, Tag, Tooltip, Typography, theme } from "antd";
 import type { MenuProps } from "antd";
 import { DeleteOutlined, EditOutlined, LoginOutlined, LogoutOutlined, MoreOutlined, PictureOutlined, PlusOutlined, ReloadOutlined } from "@ant-design/icons";
@@ -44,6 +44,7 @@ interface PendingAccountInfo {
   id: string;
   autoLabel: string;
   isAutoNamed: boolean;
+  method?: string;
 }
 
 export function AccountsView({ isMobile }: AccountsViewProps) {
@@ -87,6 +88,23 @@ export function AccountsView({ isMobile }: AccountsViewProps) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  const autoChecked = useRef(false);
+  useEffect(() => {
+    if (autoChecked.current || loading || accounts.length === 0) return;
+    autoChecked.current = true;
+    const unchecked = accounts.filter((a) => !a.status?.checkedAt);
+    if (unchecked.length === 0) return;
+    setCheckingIds((prev) => new Set([...prev, ...unchecked.map((a) => a.id)]));
+    Promise.allSettled(unchecked.map((a) => api.checkAccount(a.id))).then(() => {
+      setCheckingIds((prev) => {
+        const next = new Set(prev);
+        unchecked.forEach((a) => next.delete(a.id));
+        return next;
+      });
+      refresh();
+    });
+  }, [accounts, loading, refresh]);
 
   const installedProviders = providers.filter((p) => p.installed);
 
@@ -242,6 +260,12 @@ export function AccountsView({ isMobile }: AccountsViewProps) {
     setSignInAutoStart(false);
     setPendingNewAccount(null);
 
+    if (currentPending && currentPending.method === "terminal") {
+      message.info("Finish signing in in the Terminal window, then press Check on the account.");
+      await refresh();
+      return;
+    }
+
     if (currentPending) {
       try {
         const res = await api.accounts();
@@ -384,6 +408,19 @@ export function AccountsView({ isMobile }: AccountsViewProps) {
     );
   };
 
+  const signInFromCard = (acc: Account, prov: Provider) => {
+    if (!acc.system) {
+      openSignInFor(acc);
+      return;
+    }
+    modal.confirm({
+      title: `Sign in to your default ${prov.name} sign-in?`,
+      content: `This changes the sign-in ${prov.name} uses on this computer, also outside a2a-panel. To add another ${prov.name} account next to it, use Add account instead.`,
+      okText: "Sign in",
+      onOk: () => openSignInFor(acc),
+    });
+  };
+
   const confirmDelete = (acc: Account) => {
     modal.confirm({
       title: `Delete ${acc.label}?`,
@@ -411,7 +448,7 @@ export function AccountsView({ isMobile }: AccountsViewProps) {
     const actions = [];
     if (!signedIn) {
       actions.push(
-        <Button type="link" size="small" icon={<LoginOutlined />} key="login" onClick={() => openSignInFor(acc)}>
+        <Button type="link" size="small" icon={<LoginOutlined />} key="login" onClick={() => signInFromCard(acc, prov)}>
           Sign in
         </Button>,
       );
@@ -435,7 +472,7 @@ export function AccountsView({ isMobile }: AccountsViewProps) {
       ...(!acc.system ? [{ type: "divider" as const }, { key: "delete", icon: <DeleteOutlined />, label: "Delete account", danger: true }] : []),
     ];
     const onMenuClick: MenuProps["onClick"] = ({ key }) => {
-      if (key === "signin") openSignInFor(acc);
+      if (key === "signin") signInFromCard(acc, prov);
       if (key === "picture") setAvatarAccount(acc);
       if (key === "edit") handleOpenEdit(acc);
       if (key === "logout") confirmLogout(acc, prov);
@@ -756,6 +793,7 @@ export function AccountsView({ isMobile }: AccountsViewProps) {
         account={signInTarget?.account ?? null}
         provider={signInTarget?.provider ?? null}
         autoStart={signInAutoStart}
+        onStarted={(method) => setPendingNewAccount((pending) => (pending ? { ...pending, method } : pending))}
         onClose={handleSignInClose}
         onSuccess={handleSignInSuccess}
       />

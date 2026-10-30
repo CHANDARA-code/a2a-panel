@@ -165,6 +165,101 @@ function clearReplays() {
   tryUnlink(path.join(main.realHome, '.claude', '.claude-replay'));
 }
 
+function planReplay(plan) {
+  const planText = '```json\n' + JSON.stringify(plan) + '\n```';
+  return [
+    JSON.stringify({ type: 'system', subtype: 'init', session_id: 'sess-plan' }),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: planText }] } }),
+    JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: planText,
+      usage: { input_tokens: 10, output_tokens: 10 }
+    })
+  ];
+}
+
+function setClaudeMode(accountId, mode) {
+  const dir = path.join(main.accountsDir, accountId, 'claude');
+  fs.mkdirSync(dir, { recursive: true });
+  try { fs.unlinkSync(path.join(dir, '.claude-replay')); } catch (e) {}
+  fs.writeFileSync(path.join(dir, '.claude-mode'), mode + '\n');
+}
+
+async function createClaudeAccounts(ids) {
+  for (const id of ids) {
+    const res = await fetch(`${main.base}/api/accounts`, {
+      method: 'POST',
+      headers: authed(),
+      body: JSON.stringify({ id, provider: 'claude', label: id })
+    });
+    assert.strictEqual(res.status, 201);
+  }
+}
+
+async function createTeamOverHttp(body) {
+  const res = await fetch(`${main.base}/api/teams`, {
+    method: 'POST',
+    headers: authed(),
+    body: JSON.stringify(body)
+  });
+  assert.strictEqual(res.status, 201);
+}
+
+function oneTaskPlan(assignee) {
+  return {
+    summary: 'One step',
+    tasks: [
+      {
+        id: 't1',
+        title: 'Only step',
+        assignee,
+        role: 'web-engineer',
+        prompt: 'Do the only step',
+        acceptance_criteria: [],
+        verification_command: null,
+        depends_on: []
+      }
+    ]
+  };
+}
+
+function taskCountFor(accountId) {
+  return fs.readdirSync(main.logsDir)
+    .filter((f) => f.endsWith('.log'))
+    .filter((f) => fs.readFileSync(path.join(main.logsDir, f), 'utf-8').includes(`\nAccount: ${accountId}\n`))
+    .length;
+}
+
+function nodeScript(body) {
+  return [
+    `const teams = require(${JSON.stringify(path.join(ROOT, 'teams.js'))});`,
+    'setTimeout(() => process.exit(3), 20000).unref();',
+    body
+  ].join('\n');
+}
+
+function untilRunEnds(runIdExpression) {
+  return [
+    'const timer = setInterval(() => {',
+    `  if (['completed', 'failed', 'cancelled'].includes(teams.getRun(${runIdExpression}).status)) clearInterval(timer);`,
+    '}, 50);'
+  ].join('\n');
+}
+
+function spawnNode(script) {
+  const child = spawn(process.execPath, ['-e', script], { env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (d) => { stdout += d; });
+  child.stderr.on('data', (d) => { stderr += d; });
+  child.closed = new Promise((resolve) => {
+    child.on('close', (code) => resolve({ code, stdout, stderr }));
+  });
+  return child;
+}
+
 test('team validation and CRUD via HTTP and CLI', async () => {
   const badIdRes = await fetch(`${main.base}/api/teams`, {
     method: 'POST',
@@ -1594,5 +1689,451 @@ test('defect 5: corrupt files are skipped in list functions only', async () => {
     if (fs.existsSync(validRunFile)) fs.unlinkSync(validRunFile);
     if (fs.existsSync(corruptTeamFile)) fs.unlinkSync(corruptTeamFile);
     if (fs.existsSync(corruptRunFile)) fs.unlinkSync(corruptRunFile);
+  }
+});
+
+test('H2: a plan made in one process and built in another reads as built there and cannot be built again', async () => {
+  const teamsModule = require('../teams');
+  await createClaudeAccounts(['h2-lead', 'h2-dev']);
+  await createTeamOverHttp({
+    id: 'h2-team',
+    name: 'H2 Team',
+    leader: { account: 'h2-lead' },
+    members: [{ account: 'h2-dev', roles: [] }]
+  });
+  writeClaudeReplay('h2-lead', planReplay(oneTaskPlan('h2-dev')));
+
+  const started = teamsModule.startRun({
+    teamId: 'h2-team',
+    goal: 'Plan here and build in another process',
+    workspace: main.workspace,
+    mode: 'plan'
+  });
+  await waitFor(() => teamsModule.getRun(started.id).status === 'planned');
+
+  const builder = spawnNode(nodeScript([
+    `teams.executeRun(${JSON.stringify(started.id)});`,
+    untilRunEnds(JSON.stringify(started.id))
+  ].join('\n')));
+  const built = await builder.closed;
+  assert.strictEqual(built.code, 0, built.stderr);
+
+  const seen = teamsModule.getRun(started.id);
+  assert.strictEqual(seen.status, 'completed');
+  assert.strictEqual(seen.tasks[0].status, 'completed');
+  assert.throws(
+    () => teamsModule.executeRun(started.id),
+    (err) => err instanceof teamsModule.TeamError && err.code === 409
+  );
+  assert.strictEqual(taskCountFor('h2-dev'), 1);
+});
+
+test('H2: two processes building the same plan at the same time start it only once', async () => {
+  const teamsModule = require('../teams');
+  await createClaudeAccounts(['h2-race-lead', 'h2-race-dev']);
+  await createTeamOverHttp({
+    id: 'h2-race-team',
+    name: 'H2 Race Team',
+    leader: { account: 'h2-race-lead' },
+    members: [{ account: 'h2-race-dev', roles: [] }]
+  });
+  writeClaudeReplay('h2-race-lead', planReplay(oneTaskPlan('h2-race-dev')));
+
+  const started = teamsModule.startRun({
+    teamId: 'h2-race-team',
+    goal: 'Build the same plan from two processes',
+    workspace: main.workspace,
+    mode: 'plan'
+  });
+  await waitFor(() => teamsModule.getRun(started.id).status === 'planned');
+
+  const markers = fs.mkdtempSync(path.join(os.tmpdir(), 'a2a-h2-race-'));
+  const paused = path.join(markers, 'paused');
+  const resume = path.join(markers, 'resume');
+  const runId = JSON.stringify(started.id);
+  const first = spawnNode(nodeScript([
+    'const fs = require(\'fs\');',
+    'const rename = fs.renameSync;',
+    'let held = false;',
+    'fs.renameSync = function (from, to) {',
+    `  if (!held && to === ${JSON.stringify(teamsModule.runFile(started.id))} && JSON.parse(fs.readFileSync(from, 'utf-8')).status === 'running') {`,
+    '    held = true;',
+    `    fs.writeFileSync(${JSON.stringify(paused)}, '');`,
+    '    const deadline = Date.now() + 10000;',
+    `    while (!fs.existsSync(${JSON.stringify(resume)}) && Date.now() < deadline) {}`,
+    '  }',
+    '  return rename.apply(fs, arguments);',
+    '};',
+    `teams.executeRun(${runId});`,
+    untilRunEnds(runId)
+  ].join('\n')));
+
+  try {
+    await waitFor(() => fs.existsSync(paused));
+    const second = spawnNode(nodeScript([
+      'try {',
+      `  teams.executeRun(${runId});`,
+      '  console.log(JSON.stringify({ started: true }));',
+      '} catch (err) {',
+      '  console.log(JSON.stringify({ code: err.code }));',
+      '}'
+    ].join('\n')));
+    const raced = await second.closed;
+    assert.deepStrictEqual(JSON.parse(raced.stdout), { code: 409 });
+    assert.throws(
+      () => teamsModule.executeRun(started.id),
+      (err) => err instanceof teamsModule.TeamError && err.code === 409
+    );
+  } finally {
+    fs.writeFileSync(resume, '');
+    await first.closed;
+    fs.rmSync(markers, { recursive: true, force: true });
+  }
+
+  const winner = await first.closed;
+  assert.strictEqual(winner.code, 0, winner.stderr);
+  const done = teamsModule.getRun(started.id);
+  assert.strictEqual(done.status, 'completed');
+  assert.strictEqual(done.tasks[0].status, 'completed');
+  assert.strictEqual(taskCountFor('h2-race-dev'), 1);
+});
+
+test('H3: a run whose team file disappears mid-run finishes from its team snapshot without crashing its process', async () => {
+  const teamsModule = require('../teams');
+  const { cancelTask } = require('../dispatcher');
+  await createClaudeAccounts(['h3-lead', 'h3-dev']);
+  await createTeamOverHttp({
+    id: 'h3-vanish-team',
+    name: 'H3 Vanish Team',
+    leader: { account: 'h3-lead' },
+    members: [{ account: 'h3-dev', roles: [] }]
+  });
+  writeClaudeReplay('h3-lead', planReplay(oneTaskPlan('h3-dev')));
+  setClaudeMode('h3-dev', 'hang');
+
+  const runner = spawnNode(nodeScript([
+    'const run = teams.startRun({',
+    '  teamId: \'h3-vanish-team\',',
+    '  goal: \'Outlive the team file\',',
+    `  workspace: ${JSON.stringify(main.workspace)},`,
+    '  mode: \'accept-edits\'',
+    '});',
+    untilRunEnds('run.id')
+  ].join('\n')));
+
+  try {
+    const running = await waitFor(() => {
+      const run = teamsModule.listRuns({ teamId: 'h3-vanish-team' })[0];
+      return run && run.tasks[0] && run.tasks[0].status === 'running' && run.tasks[0].taskId ? run : null;
+    });
+    fs.unlinkSync(teamsModule.teamFile('h3-vanish-team'));
+    assert.strictEqual(cancelTask(running.tasks[0].taskId).ok, true);
+
+    const exited = await runner.closed;
+    assert.strictEqual(exited.code, 0, exited.stderr);
+    const finished = teamsModule.getRun(running.id);
+    assert.strictEqual(finished.status, 'failed');
+    assert.strictEqual(finished.tasks[0].status, 'cancelled');
+    assert.strictEqual(finished.error, '1 of 1 tasks did not complete');
+  } finally {
+    runner.kill('SIGKILL');
+  }
+});
+
+test('H3: deleting a team is refused with 409 while it has a live run, and stale or finished runs do not block it', async () => {
+  const teamsModule = require('../teams');
+  await createClaudeAccounts(['h3b-lead', 'h3b-dev']);
+  await createTeamOverHttp({
+    id: 'h3-busy-team',
+    name: 'H3 Busy Team',
+    leader: { account: 'h3b-lead' },
+    members: [{ account: 'h3b-dev', roles: [] }]
+  });
+  writeClaudeReplay('h3b-lead', planReplay(oneTaskPlan('h3b-dev')));
+  setClaudeMode('h3b-dev', 'hang');
+
+  const deleteTeam = () => fetch(`${main.base}/api/teams/h3-busy-team`, { method: 'DELETE', headers: authed() });
+  const runRes = await fetch(`${main.base}/api/teams/h3-busy-team/runs`, {
+    method: 'POST',
+    headers: authed(),
+    body: JSON.stringify({ goal: 'Keep the team busy', workspace: main.workspace, mode: 'plan' })
+  });
+  assert.strictEqual(runRes.status, 202);
+  const runId = (await runRes.json()).run.id;
+  const readRun = async () => (await (await fetch(`${main.base}/api/team-runs/${runId}`)).json()).run;
+
+  const staleFiles = [];
+  try {
+    await waitFor(async () => (await readRun()).status === 'planned');
+    const refusedPlanned = await deleteTeam();
+    assert.strictEqual(refusedPlanned.status, 409);
+    assert.ok((await refusedPlanned.json()).error.includes(runId));
+
+    const execRes = await fetch(`${main.base}/api/team-runs/${runId}/execute`, { method: 'POST', headers: authed() });
+    assert.strictEqual(execRes.status, 200);
+    await waitFor(async () => {
+      const run = await readRun();
+      return run.tasks[0].status === 'running' && run.tasks[0].taskId;
+    });
+    const refusedRunning = await deleteTeam();
+    assert.strictEqual(refusedRunning.status, 409);
+    assert.throws(
+      () => teamsModule.deleteTeam('h3-busy-team'),
+      (err) => err instanceof teamsModule.TeamError && err.code === 409
+    );
+
+    const cancelRes = await fetch(`${main.base}/api/team-runs/${runId}/cancel`, { method: 'POST', headers: authed() });
+    assert.strictEqual(cancelRes.status, 200);
+    await waitFor(async () => (await readRun()).status === 'cancelled');
+
+    ['planning', 'planned', 'running', 'reviewing'].forEach((status, index) => {
+      const staleId = `run_1700000000000_h3stale${index}`;
+      const file = teamsModule.runFile(staleId);
+      staleFiles.push(file);
+      fs.writeFileSync(file, JSON.stringify({
+        id: staleId,
+        teamId: 'h3-busy-team',
+        teamName: 'H3 Busy Team',
+        goal: 'Left behind by a process that died',
+        workspace: main.workspace,
+        mode: 'plan',
+        status,
+        startedAt: new Date().toISOString(),
+        finishedAt: null,
+        error: null,
+        leader: { account: 'h3b-lead', taskId: null },
+        summary: null,
+        tasks: [],
+        review: null,
+        usage: { total_tokens: 0 },
+        pid: 999999
+      }, null, 2) + '\n');
+    });
+
+    const deleted = await deleteTeam();
+    assert.strictEqual(deleted.status, 200);
+    assert.strictEqual((await fetch(`${main.base}/api/teams/h3-busy-team`)).status, 404);
+  } finally {
+    await fetch(`${main.base}/api/team-runs/${runId}/cancel`, { method: 'POST', headers: authed() });
+    for (const file of staleFiles) {
+      try { fs.unlinkSync(file); } catch (e) {}
+    }
+  }
+});
+
+test('H3: an error thrown while a task finishes fails the run with that error instead of crashing its process', async () => {
+  const teamsModule = require('../teams');
+  await createClaudeAccounts(['h3c-lead', 'h3c-dev']);
+  await createTeamOverHttp({
+    id: 'h3-crash-team',
+    name: 'H3 Crash Team',
+    leader: { account: 'h3c-lead' },
+    members: [{ account: 'h3c-dev', roles: [] }]
+  });
+  writeClaudeReplay('h3c-lead', planReplay(oneTaskPlan('h3c-dev')));
+
+  const runner = spawnNode(nodeScript([
+    'const fs = require(\'fs\');',
+    'const rename = fs.renameSync;',
+    'let thrown = false;',
+    'fs.renameSync = function (from, to) {',
+    '  if (!thrown && to.startsWith(teams.getRunsDir()) && JSON.parse(fs.readFileSync(from, \'utf-8\')).tasks.some((t) => t.status === \'completed\')) {',
+    '    thrown = true;',
+    '    throw new Error(\'injected write failure\');',
+    '  }',
+    '  return rename.apply(fs, arguments);',
+    '};',
+    'const run = teams.startRun({',
+    '  teamId: \'h3-crash-team\',',
+    '  goal: \'Survive a failing write\',',
+    `  workspace: ${JSON.stringify(main.workspace)},`,
+    '  mode: \'accept-edits\'',
+    '});',
+    untilRunEnds('run.id')
+  ].join('\n')));
+
+  try {
+    const exited = await runner.closed;
+    assert.strictEqual(exited.code, 0, exited.stderr);
+    const failed = teamsModule.listRuns({ teamId: 'h3-crash-team' })[0];
+    assert.strictEqual(failed.status, 'failed');
+    assert.ok(failed.error && failed.error.includes('injected write failure'), failed.error);
+    assert.ok(failed.finishedAt);
+  } finally {
+    runner.kill('SIGKILL');
+  }
+});
+
+test('M3: a developer task that cannot start leaves the run reviewing until its review ends', async () => {
+  const teamsModule = require('../teams');
+  const { cancelTask } = require('../dispatcher');
+  await createClaudeAccounts(['m3-lead', 'm3-dev', 'm3-broke']);
+  const budgetRes = await fetch(`${main.base}/api/accounts/m3-broke/budget`, {
+    method: 'PUT',
+    headers: authed(),
+    body: JSON.stringify({ period: 'day', tokens: 1000, stop: true })
+  });
+  assert.strictEqual(budgetRes.status, 200);
+  fs.appendFileSync(path.join(main.logsDir, 'usage.jsonl'), JSON.stringify({
+    at: new Date().toISOString(),
+    taskId: 'a2a_m3_seed',
+    account: 'm3-broke',
+    provider: 'claude',
+    usage: { total_tokens: 5000 }
+  }) + '\n');
+  await createTeamOverHttp({
+    id: 'm3-review-team',
+    name: 'M3 Review Team',
+    review: true,
+    leader: { account: 'm3-lead' },
+    members: [
+      { account: 'm3-dev', roles: [] },
+      { account: 'm3-broke', roles: [] }
+    ]
+  });
+  writeClaudeReplay('m3-lead', planReplay({
+    summary: 'Two steps',
+    tasks: [
+      {
+        id: 't1',
+        title: 'First step',
+        assignee: 'm3-dev',
+        role: 'web-engineer',
+        prompt: 'Do the first step',
+        acceptance_criteria: [],
+        verification_command: null,
+        depends_on: []
+      },
+      {
+        id: 't2',
+        title: 'Second step',
+        assignee: 'm3-broke',
+        role: 'api-engineer',
+        prompt: 'Do the second step',
+        acceptance_criteria: [],
+        verification_command: null,
+        depends_on: ['t1']
+      }
+    ]
+  }));
+
+  const started = teamsModule.startRun({
+    teamId: 'm3-review-team',
+    goal: 'Review after a refused task',
+    workspace: main.workspace,
+    mode: 'plan'
+  });
+  await waitFor(() => teamsModule.getRun(started.id).status === 'planned');
+  setClaudeMode('m3-lead', 'hang');
+  teamsModule.executeRun(started.id);
+
+  let reviewTaskId = null;
+  try {
+    const reviewing = await waitFor(() => {
+      const run = teamsModule.getRun(started.id);
+      return run.review && run.review.taskId ? run : null;
+    });
+    reviewTaskId = reviewing.review.taskId;
+    assert.strictEqual(reviewing.tasks[0].status, 'completed');
+    assert.strictEqual(reviewing.tasks[1].status, 'failed');
+    assert.ok(reviewing.tasks[1].error.includes('budget'), reviewing.tasks[1].error);
+    assert.strictEqual(reviewing.status, 'reviewing');
+    assert.strictEqual(reviewing.finishedAt, null);
+    assert.strictEqual(reviewing.review.status, 'running');
+    assert.strictEqual(JSON.parse(fs.readFileSync(teamsModule.runFile(started.id), 'utf-8')).status, 'reviewing');
+
+    assert.strictEqual(cancelTask(reviewTaskId).ok, true);
+    const finished = await waitFor(() => {
+      const run = teamsModule.getRun(started.id);
+      return run.status === 'failed' ? run : null;
+    });
+    assert.strictEqual(finished.review.status, 'cancelled');
+    assert.ok(finished.finishedAt);
+    assert.strictEqual(finished.error, '1 of 2 tasks did not complete');
+  } finally {
+    if (reviewTaskId) cancelTask(reviewTaskId);
+  }
+});
+
+function independentTasks(assignees) {
+  return {
+    summary: 'Independent steps',
+    tasks: assignees.map((assignee, index) => ({
+      id: `t${index + 1}`,
+      title: `Step ${index + 1}`,
+      assignee,
+      role: 'web-engineer',
+      prompt: `Do step ${index + 1}`,
+      acceptance_criteria: [],
+      verification_command: null,
+      depends_on: []
+    }))
+  };
+}
+
+async function blockAccountByBudget(accountId) {
+  await fetch(`${main.base}/api/accounts/${accountId}/budget`, { method: 'PUT', headers: authed(), body: JSON.stringify({ period: 'day', tokens: 1000, stop: true }) });
+  fs.appendFileSync(path.join(main.logsDir, 'usage.jsonl'), JSON.stringify({ at: new Date().toISOString(), taskId: `a2a_seed_${accountId}`, account: accountId, provider: 'claude', usage: { total_tokens: 5000 } }) + '\n');
+}
+
+test('the parallel limit holds when a task cannot start', async () => {
+  const teamsModule = require('../teams');
+  await createClaudeAccounts(['mp-lead', 'mp-dev', 'mp-broke']);
+  await blockAccountByBudget('mp-broke');
+  await createTeamOverHttp({ id: 'mp-team', name: 'Parallel limit team', maxParallel: 2, leader: { account: 'mp-lead' }, members: [{ account: 'mp-dev', roles: [] }, { account: 'mp-broke', roles: [] }] });
+  writeClaudeReplay('mp-lead', planReplay(independentTasks(['mp-broke', 'mp-dev', 'mp-dev', 'mp-dev'])));
+  const started = teamsModule.startRun({ teamId: 'mp-team', goal: 'Four steps', workspace: main.workspace, mode: 'plan' });
+  await waitFor(() => teamsModule.getRun(started.id).status === 'planned');
+  setClaudeMode('mp-dev', 'hang');
+  teamsModule.executeRun(started.id);
+  try {
+    await waitFor(() => teamsModule.getRun(started.id).tasks[0].status === 'failed');
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const run = teamsModule.getRun(started.id);
+    const running = run.tasks.filter((t) => t.status === 'running').length;
+    assert.ok(running <= 2, `${running} tasks running with maxParallel 2: ${run.tasks.map((t) => `${t.id}=${t.status}`).join(' ')}`);
+    assert.strictEqual(running, 2);
+  } finally {
+    teamsModule.cancelRun(started.id);
+  }
+});
+
+test('a cancel from another process keeps every task of the run cancelled', async () => {
+  const teamsModule = require('../teams');
+  await createClaudeAccounts(['xc-lead', 'xc-dev']);
+  await createTeamOverHttp({ id: 'xc-team', name: 'Cross-process cancel team', leader: { account: 'xc-lead' }, members: [{ account: 'xc-dev', roles: [] }] });
+  const plan = independentTasks(['xc-dev', 'xc-dev']);
+  plan.tasks[1].depends_on = ['t1'];
+  writeClaudeReplay('xc-lead', planReplay(plan));
+  const started = teamsModule.startRun({ teamId: 'xc-team', goal: 'Two steps in a row', workspace: main.workspace, mode: 'plan' });
+  await waitFor(() => teamsModule.getRun(started.id).status === 'planned');
+  setClaudeMode('xc-dev', 'hang');
+  teamsModule.executeRun(started.id);
+  await waitFor(() => teamsModule.getRun(started.id).tasks[0].taskId);
+  const other = spawnNode(nodeScript(`teams.cancelRun(${JSON.stringify(started.id)}); process.exit(0);`));
+  assert.strictEqual((await other.closed).code, 0);
+  const onDisk = () => JSON.parse(fs.readFileSync(teamsModule.runFile(started.id), 'utf-8'));
+  await waitFor(() => onDisk().tasks[0].output !== undefined, 15000);
+  const run = onDisk();
+  assert.strictEqual(run.status, 'cancelled');
+  assert.deepStrictEqual(run.tasks.map((t) => t.status), ['cancelled', 'cancelled']);
+});
+
+test('a claim left behind by a killed process does not block building the plan', async () => {
+  const teamsModule = require('../teams');
+  await createClaudeAccounts(['sc-lead', 'sc-dev']);
+  await createTeamOverHttp({ id: 'sc-team', name: 'Stale claim team', leader: { account: 'sc-lead' }, members: [{ account: 'sc-dev', roles: [] }] });
+  writeClaudeReplay('sc-lead', planReplay(oneTaskPlan('sc-dev')));
+  const started = teamsModule.startRun({ teamId: 'sc-team', goal: 'One step', workspace: main.workspace, mode: 'plan' });
+  await waitFor(() => teamsModule.getRun(started.id).status === 'planned');
+  const claim = `${teamsModule.runFile(started.id)}.execute-claim`;
+  fs.mkdirSync(claim);
+  const old = new Date(Date.now() - 120000);
+  fs.utimesSync(claim, old, old);
+  setClaudeMode('sc-dev', 'hang');
+  try {
+    assert.strictEqual(teamsModule.executeRun(started.id).status, 'running');
+  } finally {
+    teamsModule.cancelRun(started.id);
   }
 });

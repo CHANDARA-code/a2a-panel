@@ -3,7 +3,7 @@ const path = require('path');
 const os = require('os');
 const { execFile, execFileSync } = require('child_process');
 const { DATA_DIR } = require('./config');
-const { PROVIDERS, statusCommand, parseStatus } = require('./providers');
+const { PROVIDERS, statusCommand, parseStatus, resolveBin, logoutArgs } = require('./providers');
 
 const RESERVED_IDS = new Set(['agy', 'claude', 'codex', 'none', 'default', 'system', 'logins']);
 const ACCOUNT_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,47}$/;
@@ -323,6 +323,22 @@ function resolveAccount(id) {
   return account;
 }
 
+const MODEL_PATTERN = /^[A-Za-z0-9][\w.:-]{0,63}$/;
+
+function validModel(model) {
+  const value = typeof model === 'string' ? model.trim() : '';
+  if (!value) return null;
+  if (!MODEL_PATTERN.test(value)) throw new AccountError('Invalid model name: use letters, digits, ".", ":", "_" or "-" (at most 64)', 400);
+  return value;
+}
+
+function signOutBeforeDelete(account) {
+  if (account.provider !== 'claude' && account.provider !== 'codex') return;
+  try {
+    execFileSync(resolveBin(account.provider), logoutArgs(account.provider), { env: accountEnv(account), stdio: 'ignore', timeout: 20000 });
+  } catch (err) {}
+}
+
 function createAccount({ id, provider, label, model }) {
   if (!ACCOUNT_ID_PATTERN.test(id)) {
     throw new AccountError('Invalid account id', 400);
@@ -345,7 +361,7 @@ function createAccount({ id, provider, label, model }) {
     id,
     provider,
     label: (label && typeof label === 'string' && label.trim()) || id,
-    model: (model && typeof model === 'string' && model.trim()) || null,
+    model: validModel(model),
     createdAt: new Date().toISOString(),
     signedInHere: false,
     status: {
@@ -378,7 +394,7 @@ function updateAccount(id, { label, model }) {
     account.label = (typeof label === 'string' && label.trim()) || account.id;
   }
   if (model !== undefined) {
-    account.model = (typeof model === 'string' && model.trim()) || null;
+    account.model = validModel(model);
   }
   writeStore(store);
   return account;
@@ -412,6 +428,7 @@ function deleteAccount(id) {
   if (using && using.length > 0) {
     throw new AccountError(`Account "${id}" is used by team(s): ${using.join(', ')}. Change those teams first.`, 409);
   }
+  signOutBeforeDelete(store.accounts[index]);
   const accountDir = path.join(getAccountsDir(), id);
   if (fs.existsSync(accountDir)) {
     unlinkLinksAndRemoveDir(accountDir);
@@ -646,6 +663,19 @@ function markSignedOut(id, detail = 'Not signed in') {
   } catch (err) {}
 }
 
+function saveStatus(id, status) {
+  const store = readStore();
+  if (SYSTEM_ACCOUNTS_TEMPLATE[id]) {
+    store.systemStatus[id] = status;
+  } else {
+    const account = store.accounts.find((a) => a.id === id);
+    if (!account) return null;
+    account.status = status;
+  }
+  writeStore(store);
+  return getAccount(id);
+}
+
 function checkAccount(id) {
   return new Promise((resolve, reject) => {
     const account = getAccount(id);
@@ -682,9 +712,10 @@ function checkAccount(id) {
       if (!account.system && account.status.state === 'signed-in' && !account.signedInHere) {
         account.status.warning = 'Reports signed in although it was never signed in from a2a-panel, so it may be using your default sign-in.';
       }
-      saveAccount(account);
-      if (account.status.state !== 'signed-in') return resolve(getAccount(account.id) || account);
-      require('./identity').refreshIdentity(account).catch(() => null).then(() => resolve(getAccount(account.id) || account));
+      const current = saveStatus(account.id, account.status);
+      if (!current) return resolve(account);
+      if (current.status.state !== 'signed-in') return resolve(current);
+      require('./identity').refreshIdentity(current).catch(() => null).then(() => resolve(getAccount(current.id) || current));
     });
   });
 }

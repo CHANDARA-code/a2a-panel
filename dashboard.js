@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { execFile, execFileSync } = require('child_process');
 const { getAgentCard, buildTaskPrompt, runAgyTask, cancelTask, isTaskProcessLive, readUsageTotals, LOGS_DIR, TASK_ID_PATTERN } = require('./dispatcher');
 const presets = require('./presets');
 const accounts = require('./accounts');
@@ -555,7 +555,7 @@ async function handleAccounts(req, res, method, pathname) {
   }
 
   if (id && action === 'logout' && method === 'POST') {
-    await run(() => {
+    await run(async () => {
       const account = accounts.getAccount(id);
       if (!account) return sendJson(res, 404, { error: `Account "${id}" not found` });
       if (account.provider === 'agy') {
@@ -563,9 +563,12 @@ async function handleAccounts(req, res, method, pathname) {
       }
       const args = providers.logoutArgs(account.provider);
       const bin = providers.resolveBin(account.provider);
-      try {
-        execFileSync(bin, args, { env: accounts.accountEnv(account), stdio: ['ignore', 'pipe', 'pipe'] });
-      } catch (err) {}
+      const failure = await new Promise((resolve) => {
+        execFile(bin, args, { env: accounts.accountEnv(account), timeout: 30000 }, (err, stdout, stderr) => {
+          resolve(err ? (String(stderr || '').trim().split('\n').pop() || err.message) : null);
+        });
+      });
+      if (failure) return sendJson(res, 502, { error: `Sign-out failed: ${failure}` });
       accounts.markSignedOut(id, 'Logged out');
       sendJson(res, 200, { account: decorateAccount(accounts.getAccount(id)) });
     });
@@ -594,7 +597,7 @@ async function handleTeams(req, res, method, pathname) {
     if (method === 'POST') {
       await run(async () => {
         const body = await readJson(req);
-        const teamRun = teams.startRun({ teamId, ...body });
+        const teamRun = teams.startRun({ ...body, teamId });
         sendJson(res, 202, { run: teamRun });
       });
       return true;

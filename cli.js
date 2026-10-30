@@ -481,6 +481,11 @@ async function handleTasks() {
 
 async function handleAccounts(args) {
   const [sub = 'list', id] = args;
+  const confirmDefault = (account, action) => {
+    if (account.system && !args.includes('--yes')) {
+      throw new Error(`"${id}" is your default ${providers.PROVIDERS[account.provider].name} sign-in, used outside a2a-panel too. ${action} it with --yes, or add a separate account with "a2a-panel accounts add <id> --provider ${account.provider}".`);
+    }
+  };
   try {
     if (sub === 'list') {
       const list = accounts.listAccounts();
@@ -558,6 +563,7 @@ async function handleAccounts(args) {
       if (!id) throw new Error('Usage: a2a-panel accounts login <id>');
       const account = accounts.getAccount(id);
       if (!account) throw new Error(`Account "${id}" not found`);
+      confirmDefault(account, 'Sign in to');
       const env = accounts.accountEnv(account);
       const bin = providers.resolveBin(account.provider);
       if (account.provider === 'agy') {
@@ -570,8 +576,10 @@ async function handleAccounts(args) {
       }
       const checked = await accounts.checkAccount(id);
       if (checked.status.state === 'signed-in') {
-        account.signedInHere = true;
-        accounts.saveAccount(account);
+        const fresh = accounts.getAccount(id);
+        fresh.signedInHere = true;
+        fresh.status = { ...fresh.status, warning: null };
+        accounts.saveAccount(fresh);
       }
       console.log(`\nAccount "${id}" status: ${checked.status.state} (${checked.status.detail})\n`);
       return;
@@ -591,6 +599,7 @@ async function handleAccounts(args) {
       if (account.provider === 'agy') {
         throw new Error('Antigravity has no sign-out command; delete the account to remove its sign-in');
       }
+      confirmDefault(account, 'Sign out of');
       const cmdArgs = providers.logoutArgs(account.provider);
       const bin = providers.resolveBin(account.provider);
       const env = accounts.accountEnv(account);
@@ -766,7 +775,7 @@ async function handleTeams(args) {
 
     if (sub === 'run') {
       if (!id) throw new Error('Usage: a2a-panel teams run <id> "<goal>" [--workspace <path>] [--plan]');
-      const goal = rest.find((arg) => !arg.startsWith('-')) || '';
+      const goal = rest.find((arg, index) => !arg.startsWith('-') && rest[index - 1] !== '--workspace') || '';
       if (!goal) throw new Error('Goal is required');
       const workspace = option('--workspace');
       const isPlan = rest.includes('--plan');

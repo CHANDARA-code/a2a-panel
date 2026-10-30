@@ -482,6 +482,14 @@ function startServer() {
     console.error(`[A2A Protocol Server] Refusing to listen on "${HOST}": the server hands its token to any client that can reach it, so it only binds to loopback (127.0.0.1, localhost or ::1).`);
     process.exit(1);
   }
+  const { stopAllLogins } = require('./account-login');
+  process.on('exit', stopAllLogins);
+  for (const [signal, code] of [['SIGTERM', 143], ['SIGINT', 130]]) {
+    process.once(signal, () => {
+      stopAllLogins();
+      process.exit(code);
+    });
+  }
   server.listen(PORT, HOST, () => {
     console.log(`[A2A Protocol Server] Listening on http://${HOST}:${PORT}`);
     console.log(`[A2A Protocol Server] Agent Card: http://${HOST}:${PORT}/.well-known/agent-card.json`);

@@ -143,6 +143,22 @@ function purgeOldSessions() {
   }
 }
 
+function stopAllLogins() {
+  for (const [loginId, child] of childProcesses) {
+    for (const pgid of new Set([child.pid, ...processGroupsUnder(child.pid)])) {
+      try {
+        process.kill(-pgid, 'SIGKILL');
+      } catch (err) {}
+    }
+    const session = sessions.get(loginId);
+    if (session && (session.state === 'starting' || session.state === 'waiting')) {
+      session.state = 'cancelled';
+      session.finishedAt = new Date().toISOString();
+    }
+  }
+  childProcesses.clear();
+}
+
 function startLogin(accountId, method) {
   const account = getAccount(accountId);
   if (!account) {
@@ -389,6 +405,7 @@ function cancelLogin(loginId) {
 }
 
 module.exports = {
+  stopAllLogins,
   startLogin,
   getLogin,
   submitCode,

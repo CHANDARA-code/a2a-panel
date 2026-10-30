@@ -12,6 +12,7 @@ interface SignInModalProps {
   onClose: () => void;
   onSuccess: () => void;
   autoStart?: boolean;
+  onStarted?: (method: LoginMethod) => void;
 }
 
 const METHOD_LABELS: Record<LoginMethod, string> = {
@@ -28,7 +29,7 @@ const STATE_TAGS: Record<LoginState, { color: string; label: string; icon: React
   cancelled: { color: "default", label: "Cancelled", icon: <StopOutlined /> },
 };
 
-export function SignInModal({ account, provider, open, onClose, onSuccess, autoStart }: SignInModalProps) {
+export function SignInModal({ account, provider, open, onClose, onSuccess, autoStart, onStarted }: SignInModalProps) {
   const { message } = AntApp.useApp();
   const [method, setMethod] = useState<LoginMethod>("browser");
   const [session, setSession] = useState<LoginSession | null>(null);
@@ -47,6 +48,7 @@ export function SignInModal({ account, provider, open, onClose, onSuccess, autoS
     setStarting(true);
     try {
       const res = await api.loginAccount(account.id, targetMethod);
+      onStarted?.(targetMethod);
       setSession(res);
       if (res.state === "succeeded") {
         onSuccess();

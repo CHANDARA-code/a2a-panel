@@ -12,6 +12,9 @@ CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 MARKER="$CONFIG_DIR/.signed-in"
 
 if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
+  if [ -n "$FAKE_CLAUDE_STATUS_DELAY" ]; then
+    sleep "$FAKE_CLAUDE_STATUS_DELAY"
+  fi
   if [ -f "$MARKER" ]; then
     echo '{"loggedIn":true,"authMethod":"claude.ai","email":"user@example.com","subscriptionType":"max"}'
   else
@@ -37,6 +40,13 @@ if [ "$1" = "auth" ] && [ "$2" = "login" ]; then
 fi
 
 if [ "$1" = "auth" ] && [ "$2" = "logout" ]; then
+  if [ -n "$FAKE_ARGS_FILE" ]; then
+    echo "LOGOUT: $CONFIG_DIR" >> "$FAKE_ARGS_FILE"
+  fi
+  if [ -f "$CONFIG_DIR/.logout-fail" ]; then
+    echo "logout failed: the keychain is locked" >&2
+    exit 1
+  fi
   rm -f "$MARKER"
   exit 0
 fi
@@ -92,6 +102,10 @@ case "$MODE" in
     ;;
   error)
     echo '{"type":"result","subtype":"error","is_error":true,"result":"Claude execution failed","error":"Something went wrong"}'
+    exit 1
+    ;;
+  prose-final)
+    echo '{"type":"result","subtype":"success","is_error":true,"result":"Users report the app says they are not logged in, and the staging server answers invalid api key.","session_id":"claude-session-prose-final","usage":{"input_tokens":5,"output_tokens":5}}'
     exit 1
     ;;
   prose-fail)
