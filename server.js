@@ -4,6 +4,7 @@ const { getAgentCard, runAgyTask, cancelTask, activeTasks } = require('./dispatc
 const dashboard = require('./dashboard');
 const security = require('./security');
 const presets = require('./presets');
+const accounts = require('./accounts');
 
 process.on('unhandledRejection', (err) => {
   console.error('[A2A Protocol Server] Unhandled rejection:', err && err.message);
@@ -155,6 +156,8 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, {
         id: task.id,
         role: task.role,
+        account: task.account || null,
+        provider: task.provider || null,
         status: task.status,
         startedAt: task.startedAt,
         finishedAt: task.finishedAt,
@@ -198,6 +201,7 @@ const server = http.createServer(async (req, res) => {
       const conversation_id = body.conversation_id;
       const verification_command = typeof body.verification_command === 'string' ? body.verification_command : undefined;
       const preset = body.preset;
+      const account = body.account;
       const isAsync = body.isAsync || body.async || false;
 
       if (!prompt) {
@@ -207,13 +211,20 @@ const server = http.createServer(async (req, res) => {
       if (presetProblem) {
         return sendJson(res, 400, { error: presetProblem });
       }
+      if (account !== undefined && account !== null) {
+        if (typeof account !== 'string' || !accounts.getAccount(account)) {
+          return sendJson(res, 400, { error: 'Unknown account' });
+        }
+      }
 
       if (isAsync) {
-        const { taskId, taskRecord } = runAgyTask({ role, prompt, workspace, mode, effort, model, conversation_id, verification_command, preset });
+        const { taskId, taskRecord } = runAgyTask({ role, prompt, workspace, mode, effort, model, conversation_id, verification_command, preset, account });
         return sendJson(res, 202, {
           taskId,
           status: 'running',
           skill: taskRecord.role,
+          account: taskRecord.account,
+          provider: taskRecord.provider,
           preset: taskRecord.preset,
           workspace: taskRecord.workspace,
           checkUrl: `http://${HOST}:${PORT}/tasks/${taskId}`
@@ -231,9 +242,12 @@ const server = http.createServer(async (req, res) => {
           conversation_id,
           verification_command,
           preset,
+          account,
           onDone: (taskRecord) => {
             sendJson(res, 200, {
               taskId: taskRecord.id,
+              account: taskRecord.account,
+              provider: taskRecord.provider,
               preset: taskRecord.preset,
               preferenceFiles: taskRecord.preferenceFiles,
               usage: taskRecord.usage,
@@ -300,6 +314,7 @@ const server = http.createServer(async (req, res) => {
         const conversation_id = params && params.conversation_id;
         const verification_command = params && typeof params.verification_command === 'string' ? params.verification_command : undefined;
         const preset = params ? params.preset : undefined;
+        const account = params && params.account;
         const isAsync = (params && (params.isAsync || params.async)) || false;
 
         if (!prompt) {
@@ -313,9 +328,14 @@ const server = http.createServer(async (req, res) => {
         if (presetProblem) {
           return sendJson(res, 200, { jsonrpc: '2.0', id, error: { code: -32602, message: presetProblem } });
         }
+        if (account !== undefined && account !== null) {
+          if (typeof account !== 'string' || !accounts.getAccount(account)) {
+            return sendJson(res, 200, { jsonrpc: '2.0', id, error: { code: -32602, message: 'Unknown account' } });
+          }
+        }
 
         if (isAsync) {
-          const { taskId, taskRecord } = runAgyTask({ role, prompt, workspace, mode, effort, model, conversation_id, verification_command, preset });
+          const { taskId, taskRecord } = runAgyTask({ role, prompt, workspace, mode, effort, model, conversation_id, verification_command, preset, account });
           return sendJson(res, 200, {
             jsonrpc: '2.0',
             id,
@@ -323,6 +343,8 @@ const server = http.createServer(async (req, res) => {
               taskId,
               status: 'running',
               skill: taskRecord.role,
+              account: taskRecord.account,
+              provider: taskRecord.provider,
               preset: taskRecord.preset
             }
           });
@@ -339,12 +361,15 @@ const server = http.createServer(async (req, res) => {
             conversation_id,
             verification_command,
             preset,
+            account,
             onDone: (taskRecord) => {
               sendJson(res, 200, {
                 jsonrpc: '2.0',
                 id,
                 result: {
                   taskId: taskRecord.id,
+                  account: taskRecord.account,
+                  provider: taskRecord.provider,
                   usage: taskRecord.usage,
                   verification: taskRecord.verification,
                   conversationId: taskRecord.conversationId,
@@ -396,6 +421,8 @@ const server = http.createServer(async (req, res) => {
             id: task.id,
             status: task.status,
             skill: task.role,
+            account: task.account || null,
+            provider: task.provider || null,
             message: {
               role: 'ROLE_ASSISTANT',
               parts: [{ text: task.output }]

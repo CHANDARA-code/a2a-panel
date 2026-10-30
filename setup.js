@@ -3,6 +3,8 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 const { AGY_BIN, LOGS_DIR } = require('./dispatcher');
 const { DATA_DIR } = require('./config');
+const { resolveBin } = require('./providers');
+const { listAccounts } = require('./accounts');
 
 const MCP_NAME = 'a2a-panel';
 const LEGACY_MCP_NAMES = ['agy-bridge', 'a2a-antigravity'];
@@ -65,8 +67,10 @@ function runDoctor() {
   const panelBuilt = fs.existsSync(path.join(__dirname, 'panel', 'dist', 'index.html'));
   add(panelBuilt ? 'ok' : 'warn', 'Web panel', panelBuilt ? 'built' : 'not built. Run "npm run build:panel" to enable the dashboard.');
 
-  const claude = tryRun('claude', ['--version']);
+  const claudeBin = resolveBin('claude');
+  const claude = tryRun(claudeBin, ['--version']);
   if (claude.ok) {
+    add('ok', 'Claude Code CLI (claude)', `${claudeBin} ${claude.output.split('\n')[0]}`);
     const listing = claudeMcpList();
     const legacy = legacyRegistrations(listing);
     if (isRegistered(listing)) {
@@ -75,8 +79,19 @@ function runDoctor() {
       add('warn', 'Claude Code MCP server', legacy.length ? `registered under the old name ${legacy.join(', ')}. Run "a2a-panel init" to rename it.` : 'not registered. Run "a2a-panel init".');
     }
   } else {
-    add('warn', 'Claude Code', 'the "claude" command was not found, so MCP registration was not checked.');
+    add('warn', 'Claude Code CLI (claude)', 'not found or not runnable (optional, needed only for Claude Code accounts)');
   }
+
+  const codexBin = resolveBin('codex');
+  const codex = tryRun(codexBin, ['--version']);
+  if (codex.ok) {
+    add('ok', 'Codex CLI (codex)', `${codexBin} ${codex.output.split('\n')[0]}`);
+  } else {
+    add('warn', 'Codex CLI (codex)', 'not found or not runnable (optional, needed only for Codex accounts)');
+  }
+
+  const accs = listAccounts();
+  add('ok', 'Accounts', `${accs.length} account(s) configured (${accs.filter((a) => !a.system).length} custom)`);
 
   return checks;
 }

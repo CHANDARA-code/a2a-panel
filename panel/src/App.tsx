@@ -27,12 +27,20 @@ import { TaskDrawer } from "./components/TaskDrawer";
 import { TaskList } from "./components/TaskList";
 
 type Filter = "all" | "running" | "completed" | "failed" | "cancelled" | "stale";
-type View = "tasks" | "presets";
+type View = "tasks" | "teams" | "accounts" | "usage" | "presets";
 
-// The presets page carries the markdown renderer, so it loads only when opened.
 const PresetsView = lazy(() => import("./components/PresetsView").then((m) => ({ default: m.PresetsView })));
+const AccountsView = lazy(() => import("./components/AccountsView").then((m) => ({ default: m.AccountsView })));
+const TeamsView = lazy(() => import("./components/TeamsView").then((m) => ({ default: m.TeamsView })));
+const UsageView = lazy(() => import("./components/UsageView").then((m) => ({ default: m.UsageView })));
 
-const viewFromHash = (): View => (window.location.hash === "#presets" ? "presets" : "tasks");
+const viewFromHash = (): View => {
+  if (window.location.hash === "#teams") return "teams";
+  if (window.location.hash === "#accounts") return "accounts";
+  if (window.location.hash === "#usage") return "usage";
+  if (window.location.hash === "#presets") return "presets";
+  return "tasks";
+};
 
 const FILTERS: { value: Filter; label: string }[] = [
   { value: "all", label: "All" },
@@ -69,7 +77,8 @@ function Panel() {
 
   const changeView = (next: View) => {
     setView(next);
-    window.history.replaceState(null, "", next === "presets" ? "#presets" : window.location.pathname + window.location.search);
+    const targetHash = next === "tasks" ? "" : `#${next}`;
+    window.history.replaceState(null, "", targetHash || window.location.pathname + window.location.search);
   };
 
   const viewSwitch = (
@@ -78,6 +87,9 @@ function Panel() {
       onChange={changeView}
       options={[
         { value: "tasks", label: "Tasks" },
+        { value: "teams", label: "Teams" },
+        { value: "accounts", label: "Accounts" },
+        { value: "usage", label: "Usage" },
         { value: "presets", label: "Presets" },
       ]}
     />
@@ -95,7 +107,9 @@ function Panel() {
     return all.filter((task) => {
       if (filter !== "all" && task.status !== filter) return false;
       if (!needle) return true;
-      return [task.id, task.role, task.workspace, task.promptPreview ?? ""].some((field) => field.toLowerCase().includes(needle));
+      return [task.id, task.role, task.workspace, task.promptPreview ?? "", task.account ?? "agy"].some((field) =>
+        field.toLowerCase().includes(needle)
+      );
     });
   }, [all, filter, query]);
 
@@ -123,7 +137,13 @@ function Panel() {
 
   const rerun = (task: Task) => {
     setSelectedId(null);
-    openComposer({ role: task.role, workspace: task.workspace, prompt: task.prompt ?? task.promptPreview ?? "", preset: task.preset ?? null });
+    openComposer({
+      role: task.role,
+      workspace: task.workspace,
+      prompt: task.prompt ?? task.promptPreview ?? "",
+      preset: task.preset ?? null,
+      account: task.account ?? "agy",
+    });
   };
 
   const created = (taskId: string) => {
@@ -194,52 +214,72 @@ function Panel() {
 
           {isMobile && <div>{viewSwitch}</div>}
 
-          {view === "presets" ? (
+          {view === "presets" && (
             <Suspense fallback={<Skeleton active />}>
               <PresetsView isMobile={isMobile} />
             </Suspense>
-          ) : (
+          )}
+
+          {view === "accounts" && (
+            <Suspense fallback={<Skeleton active />}>
+              <AccountsView isMobile={isMobile} />
+            </Suspense>
+          )}
+
+          {view === "usage" && (
+            <Suspense fallback={<Skeleton active />}>
+              <UsageView isMobile={isMobile} />
+            </Suspense>
+          )}
+
+          {view === "teams" && (
+            <Suspense fallback={<Skeleton active />}>
+              <TeamsView isMobile={isMobile} onOpenTask={(taskId) => setSelectedId(taskId)} />
+            </Suspense>
+          )}
+
+          {view === "tasks" && (
             <>
-            <Flex gap={isMobile ? 8 : 16} wrap={false} style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, minmax(0, 1fr))" : "repeat(4, minmax(0, 1fr))" }}>
-              {stats.map((stat) => (
-                <Card
-                  key={stat.key}
-                  size="small"
-                  hoverable
-                  onClick={() => setFilter(stat.key)}
-                  styles={{ body: { padding: isMobile ? 12 : 16 } }}
-                  style={filter === stat.key ? { borderColor: token.colorPrimary } : undefined}
-                >
-                  <Statistic title={stat.title} value={stat.value} valueStyle={{ color: stat.color, fontWeight: 600 }} loading={tasks.loading} />
-                </Card>
-              ))}
-            </Flex>
-
-            <Flex vertical={isMobile} gap={12} justify="space-between" align={isMobile ? "stretch" : "center"}>
-              <div style={{ overflowX: "auto", paddingBottom: 2 }}>
-                <Segmented<Filter>
-                  value={filter}
-                  onChange={setFilter}
-                  options={FILTERS.map((item) => ({
-                    value: item.value,
-                    label: item.value === "all" ? item.label : `${item.label} ${counts[item.value]}`,
-                  }))}
-                />
-              </div>
-              <Flex gap={8} style={{ flex: isMobile ? undefined : "0 1 360px" }}>
-                <Input.Search allowClear placeholder="Search role, prompt, workspace, id" value={query} onChange={(event) => setQuery(event.target.value)} />
-                <Button aria-label="Refresh" icon={<ReloadOutlined />} onClick={() => { tasks.refresh(); health.refresh(); }} />
+              <Flex gap={isMobile ? 8 : 16} wrap={false} style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, minmax(0, 1fr))" : "repeat(4, minmax(0, 1fr))" }}>
+                {stats.map((stat) => (
+                  <Card
+                    key={stat.key}
+                    size="small"
+                    hoverable
+                    onClick={() => setFilter(stat.key)}
+                    styles={{ body: { padding: isMobile ? 12 : 16 } }}
+                    style={filter === stat.key ? { borderColor: token.colorPrimary } : undefined}
+                  >
+                    <Statistic title={stat.title} value={stat.value} valueStyle={{ color: stat.color, fontWeight: 600 }} loading={tasks.loading} />
+                  </Card>
+                ))}
               </Flex>
-            </Flex>
 
-            <TaskList
-              tasks={visible}
-              loading={tasks.loading}
-              isMobile={isMobile}
-              cancelling={cancelling}
-              onOpen={(task) => setSelectedId(task.id)}
-              onCancel={cancelTask}
-            />
+              <Flex vertical={isMobile} gap={12} justify="space-between" align={isMobile ? "stretch" : "center"}>
+                <div style={{ overflowX: "auto", paddingBottom: 2 }}>
+                  <Segmented<Filter>
+                    value={filter}
+                    onChange={setFilter}
+                    options={FILTERS.map((item) => ({
+                      value: item.value,
+                      label: item.value === "all" ? item.label : `${item.label} ${counts[item.value]}`,
+                    }))}
+                  />
+                </div>
+                <Flex gap={8} style={{ flex: isMobile ? undefined : "0 1 360px" }}>
+                  <Input.Search allowClear placeholder="Search role, prompt, workspace, id" value={query} onChange={(event) => setQuery(event.target.value)} />
+                  <Button aria-label="Refresh" icon={<ReloadOutlined />} onClick={() => { tasks.refresh(); health.refresh(); }} />
+                </Flex>
+              </Flex>
+
+              <TaskList
+                tasks={visible}
+                loading={tasks.loading}
+                isMobile={isMobile}
+                cancelling={cancelling}
+                onOpen={(task) => setSelectedId(task.id)}
+                onCancel={cancelTask}
+              />
             </>
           )}
         </Flex>

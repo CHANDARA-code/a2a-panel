@@ -3,8 +3,12 @@
 const readline = require('readline');
 const path = require('path');
 const fs = require('fs');
-const { getAgentCard, runAgyTask, cancelTask, activeTasks } = require('./dispatcher');
+const { execFileSync } = require('child_process');
+const { getAgentCard, runAgyTask, cancelTask, activeTasks, readUsageTotals } = require('./dispatcher');
 const presets = require('./presets');
+const accounts = require('./accounts');
+const providers = require('./providers');
+const teams = require('./teams');
 
 const rl = readline.createInterface({
   input: process.stdin,
@@ -21,17 +25,22 @@ function tailForLeader(taskRecord) {
   return `[output truncated to last ${LEADER_OUTPUT_LIMIT} of ${taskRecord.outputChars || out.length} chars; full log: ${taskRecord.logFile}]\n` + out.slice(-LEADER_OUTPUT_LIMIT);
 }
 
-function formatUsage(usage) {
+function formatUsage(usage, accountId, providerName) {
   if (!usage) return null;
   const parts = [`${usage.total_tokens ?? 0} total`];
   if (usage.input_tokens != null) parts.push(`${usage.input_tokens} in`);
   if (usage.output_tokens != null) parts.push(`${usage.output_tokens} out`);
   if (usage.cache_read_tokens) parts.push(`${usage.cache_read_tokens} cached`);
-  return `Antigravity tokens (not billed to Claude): ${parts.join(', ')}`;
+  if (usage.thinking_tokens) parts.push(`${usage.thinking_tokens} thinking`);
+  return `${providerName} tokens on account ${accountId}: ${parts.join(', ')}`;
 }
 
 function resultFooter(taskRecord) {
   const lines = [];
+  const accountId = taskRecord.account || 'agy';
+  const providerKey = taskRecord.provider || 'agy';
+  const providerName = (providers.PROVIDERS[providerKey] && providers.PROVIDERS[providerKey].name) || providerKey;
+  lines.push(`Account: ${accountId} (${providerName})`);
   if (taskRecord.preset || (taskRecord.preferenceFiles && taskRecord.preferenceFiles.length)) {
     const files = (taskRecord.preferenceFiles || []).map((file) => (file.source === 'workspace' ? `${file.name} (workspace)` : file.name));
     lines.push(`Preset: ${taskRecord.preset || 'none'}${files.length ? ` (${files.join(', ')})` : ''}`);
@@ -42,7 +51,7 @@ function resultFooter(taskRecord) {
     lines.push(`Verification run by the bridge (not the agent): ${verification.passed ? 'PASSED' : 'FAILED'}, exit ${verification.exitCode}${verification.timedOut ? ' (timed out)' : ''}, ${seconds}s\n  command: ${verification.command}`);
     if (!verification.passed) lines.push(`  output tail:\n${verification.outputTail.slice(-1500)}`);
   }
-  const usage = formatUsage(taskRecord.usage);
+  const usage = formatUsage(taskRecord.usage, accountId, providerName);
   if (usage) lines.push(usage);
   if (taskRecord.conversationId) lines.push(`Conversation: ${taskRecord.conversationId} (pass as conversation_id to continue it)`);
   if (taskRecord.changes) lines.push(`Workspace changes:\n${taskRecord.changes}`);
@@ -52,6 +61,66 @@ function resultFooter(taskRecord) {
 function workspaceError(workspace) {
   if (workspace && !require('fs').existsSync(workspace)) return 'Workspace does not exist: ' + workspace;
   return null;
+}
+
+function formatTeamRunSummary(run) {
+  const lines = [
+    `[A2A TEAM RUN] ${run.teamName || run.teamId} | Status: ${run.status.toUpperCase()} | Run: ${run.id}`,
+    `Leader: ${run.leader?.account || 'unknown'} | Tokens: ${run.usage?.total_tokens || 0}`
+  ];
+  if (run.summary) {
+    lines.push(`Plan: ${run.summary}`);
+  }
+  if (run.tasks && run.tasks.length > 0) {
+    for (const t of run.tasks) {
+      lines.push(`- ${t.id} ${t.title} -> ${t.assignee} (${t.role}): ${t.status}${t.error ? ': ' + t.error : ''}`);
+    }
+  }
+  if (run.review && run.review.output) {
+    lines.push(`Review: ${run.review.output.slice(0, 1500)}`);
+  }
+  if (run.workspace) {
+    try {
+      const status = execFileSync('git', ['-C', run.workspace, 'status', '--short'], { encoding: 'utf-8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      const stat = execFileSync('git', ['-C', run.workspace, 'diff', '--stat'], { encoding: 'utf-8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      const changes = [status, stat].filter(Boolean).join('\n\n').slice(0, 2000);
+      if (changes) {
+        lines.push(`Workspace changes:\n${changes}`);
+      }
+    } catch (err) {}
+  }
+  return lines.join('\n');
+}
+
+function formatTeamsList(teamsList) {
+  if (!teamsList.length) return 'No teams configured.';
+  return teamsList.map((t) => {
+    const leaderStr = `Leader: ${t.leader.account}${t.leader.model ? ` (model: ${t.leader.model})` : ''} [effort: ${t.leader.effort}]`;
+    const memberLines = t.members.map((m) => {
+      const rolesStr = m.roles && m.roles.length ? m.roles.join(', ') : 'any';
+      return `  - ${m.account}: ${rolesStr}${m.notes ? ` (${m.notes})` : ''}`;
+    });
+    return `Team: ${t.id} ("${t.name}")${t.description ? ` - ${t.description}` : ''}\n${leaderStr}\nMembers:\n${memberLines.join('\n')}`;
+  }).join('\n\n');
+}
+
+function waitForTeamRun(runId, timeoutMs = 600000) {
+  return new Promise((resolve) => {
+    const deadline = Date.now() + timeoutMs;
+    const interval = setInterval(() => {
+      let run;
+      try {
+        run = teams.getRun(runId);
+      } catch (err) {
+        clearInterval(interval);
+        return resolve(null);
+      }
+      if (['planned', 'completed', 'failed', 'cancelled', 'stale'].includes(run.status) || Date.now() >= deadline) {
+        clearInterval(interval);
+        return resolve(run);
+      }
+    }, 150);
+  });
 }
 
 function sendRpcResponse(id, result, error = null) {
@@ -133,6 +202,10 @@ const TOOLS = [
         is_async: {
           type: 'boolean',
           description: 'If true, dispatches the task to the background and returns a task ID immediately without blocking. Default is false (waits for full completion).'
+        },
+        account: {
+          type: 'string',
+          description: 'Optional account id (see a2a_list_accounts). Defaults to the default Antigravity account ("agy").'
         }
       },
       required: ['role', 'task_description']
@@ -159,9 +232,21 @@ const TOOLS = [
         workspace_path: {
           type: 'string',
           description: 'Absolute path to the repository. Defaults to current working directory.'
+        },
+        account: {
+          type: 'string',
+          description: 'Optional account id (see a2a_list_accounts). Defaults to the default Antigravity account ("agy").'
         }
       },
       required: ['task_summary', 'acceptance_criteria']
+    }
+  },
+  {
+    name: 'a2a_list_accounts',
+    description: 'List all configured agent CLI accounts (Antigravity, Claude Code, Codex), their cached status and token usage.',
+    inputSchema: {
+      type: 'object',
+      properties: {}
     }
   },
   {
@@ -206,6 +291,81 @@ const TOOLS = [
         }
       },
       required: ['task_id']
+    }
+  },
+  {
+    name: 'a2a_list_teams',
+    description: 'List configured developer teams with their leaders and specialist members.',
+    inputSchema: {
+      type: 'object',
+      properties: {}
+    }
+  },
+  {
+    name: 'a2a_run_team',
+    description: 'Run a developer team on a goal. The leader plans the tasks, and specialists execute them.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        team: {
+          type: 'string',
+          description: 'The team ID to run.'
+        },
+        goal: {
+          type: 'string',
+          description: 'The overall goal for the team to achieve.'
+        },
+        workspace_path: {
+          type: 'string',
+          description: 'Absolute path to the workspace root directory. Defaults to team workspace or current directory.'
+        },
+        mode: {
+          type: 'string',
+          description: 'Execution mode: "accept-edits" (default, plan and execute) or "plan" (plan only).',
+          enum: ['accept-edits', 'plan']
+        },
+        is_async: {
+          type: 'boolean',
+          description: 'If true, returns immediately after starting. Default false (waits for run to complete).'
+        }
+      },
+      required: ['team', 'goal']
+    }
+  },
+  {
+    name: 'a2a_get_team_run',
+    description: 'Get the status, plan, task results and summary of a team run.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        run_id: {
+          type: 'string',
+          description: 'The ID of the team run.'
+        }
+      },
+      required: ['run_id']
+    }
+  },
+  {
+    name: 'a2a_cancel_team_run',
+    description: 'Cancel an ongoing team run and any active developer tasks.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        run_id: {
+          type: 'string',
+          description: 'The ID of the team run to cancel.'
+        }
+      },
+      required: ['run_id']
+    }
+  },
+  {
+    name: 'a2a_account_usage',
+    description: 'Show token usage, quota windows, and budget room across configured accounts so a leader can pick an account with capacity.',
+    inputSchema: {
+      type: 'object',
+      properties: {}
     }
   }
 ];
@@ -286,6 +446,33 @@ rl.on('line', async (line) => {
         });
       }
 
+      if (toolName === 'a2a_list_accounts') {
+        const list = accounts.listAccounts();
+        const totals = readUsageTotals();
+        const byAccount = totals.byAccount || {};
+        const lines = list.map((a) => {
+          const providerName = (providers.PROVIDERS[a.provider] && providers.PROVIDERS[a.provider].name) || a.provider;
+          const u = byAccount[a.id] || { tasks: 0, total_tokens: 0 };
+          return `- ${a.id} (${providerName}, ${a.label}): ${a.status.state} - ${a.status.detail}; ${u.tasks} tasks, ${u.total_tokens} tokens`;
+        });
+        return sendRpcResponse(id, {
+          content: [{
+            type: 'text',
+            text: lines.join('\n')
+          }]
+        });
+      }
+
+      if (toolName === 'a2a_account_usage') {
+        const { formatAccountUsageForMcp } = require('./usage');
+        return sendRpcResponse(id, {
+          content: [{
+            type: 'text',
+            text: formatAccountUsageForMcp()
+          }]
+        });
+      }
+
       if (toolName === 'a2a_get_task_status') {
         const task = activeTasks.get(args.task_id);
         if (!task) {
@@ -341,13 +528,104 @@ rl.on('line', async (line) => {
         });
       }
 
+      if (toolName === 'a2a_list_teams') {
+        const list = teams.listTeams();
+        return sendRpcResponse(id, {
+          content: [{
+            type: 'text',
+            text: formatTeamsList(list)
+          }]
+        });
+      }
+
+      if (toolName === 'a2a_run_team') {
+        const teamId = args.team;
+        const goal = args.goal;
+        const workspace = args.workspace_path;
+        const mode = args.mode || 'accept-edits';
+        const isAsync = Boolean(args.is_async);
+
+        let run;
+        try {
+          run = teams.startRun({ teamId, goal, workspace, mode });
+        } catch (err) {
+          return sendRpcResponse(id, {
+            content: [{ type: 'text', text: `[A2A Team Run Error]: ${err.message}` }],
+            isError: true
+          });
+        }
+
+        if (isAsync) {
+          return sendRpcResponse(id, {
+            content: [{
+              type: 'text',
+              text: formatTeamRunSummary(run)
+            }]
+          });
+        }
+
+        const completedRun = await waitForTeamRun(run.id);
+        const finalRun = completedRun || teams.getRun(run.id);
+        return sendRpcResponse(id, {
+          content: [{
+            type: 'text',
+            text: formatTeamRunSummary(finalRun)
+          }],
+          isError: finalRun.status === 'failed'
+        });
+      }
+
+      if (toolName === 'a2a_get_team_run') {
+        try {
+          const run = teams.getRun(args.run_id);
+          return sendRpcResponse(id, {
+            content: [{
+              type: 'text',
+              text: formatTeamRunSummary(run)
+            }]
+          });
+        } catch (err) {
+          return sendRpcResponse(id, {
+            content: [{ type: 'text', text: `Team run "${args.run_id}" not found.` }],
+            isError: true
+          });
+        }
+      }
+
+      if (toolName === 'a2a_cancel_team_run') {
+        try {
+          const run = teams.cancelRun(args.run_id);
+          return sendRpcResponse(id, {
+            content: [{
+              type: 'text',
+              text: formatTeamRunSummary(run)
+            }]
+          });
+        } catch (err) {
+          return sendRpcResponse(id, {
+            content: [{ type: 'text', text: `Could not cancel team run "${args.run_id}": ${err.message}` }],
+            isError: true
+          });
+        }
+      }
+
       if (toolName === 'a2a_validate_delivery') {
         const {
           task_summary,
           acceptance_criteria,
           verification_command,
-          workspace_path
+          workspace_path,
+          account
         } = args;
+
+        if (account !== undefined && account !== null) {
+          if (typeof account !== 'string' || !accounts.getAccount(account)) {
+            return sendRpcResponse(id, {
+              content: [{ type: 'text', text: `[A2A Validation Error]: Unknown account "${account}".` }],
+              isError: true
+            });
+          }
+        }
 
         const badValidationWorkspace = workspaceError(workspace_path);
         if (badValidationWorkspace) {
@@ -383,6 +661,7 @@ rl.on('line', async (line) => {
             mode: 'accept-edits',
             effort: 'high',
             verification_command,
+            account,
             onDone: (taskRecord) => {
               sendRpcResponse(id, {
                 content: [{
@@ -416,8 +695,18 @@ rl.on('line', async (line) => {
           acceptance_criteria,
           verification_command,
           preset,
-          is_async = false
+          is_async = false,
+          account
         } = args;
+
+        if (account !== undefined && account !== null) {
+          if (typeof account !== 'string' || !accounts.getAccount(account)) {
+            return sendRpcResponse(id, {
+              content: [{ type: 'text', text: `[A2A Dispatch Error]: Unknown account "${account}".` }],
+              isError: true
+            });
+          }
+        }
 
         const effectiveWorkspace = workspace_path || process.cwd();
 
@@ -456,7 +745,8 @@ rl.on('line', async (line) => {
             conversation_id,
             acceptance_criteria,
             verification_command,
-            preset
+            preset,
+            account
           });
 
           return sendRpcResponse(id, {
@@ -482,6 +772,7 @@ rl.on('line', async (line) => {
             acceptance_criteria,
             verification_command,
             preset,
+            account,
             onDone: (taskRecord) => {
               const summary = [
                 `==================================================`,

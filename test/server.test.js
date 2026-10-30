@@ -13,6 +13,8 @@ const FAKE_AGENT = path.join(__dirname, 'fake-agy.sh');
 const instances = [];
 // Keep every server and in-process run away from the user's own presets (and their default preset).
 process.env.A2A_PRESETS_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'a2a-presets-'));
+process.env.A2A_ACCOUNTS_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'a2a-accounts-'));
+process.env.A2A_TEAMS_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'a2a-teams-'));
 
 function authed(extra = {}) {
   return { 'X-A2A-Token': TOKEN, 'Content-Type': 'application/json', ...extra };

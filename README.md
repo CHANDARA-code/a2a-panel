@@ -30,7 +30,7 @@ node cli.js init        # registers the MCP server with Claude Code
 node cli.js autostart enable   # optional: start the server and dashboard at login (see below)
 ```
 
-With npm: `npm install -g a2a-panel`, then `a2a-panel doctor` and `a2a-panel init`. Restart Claude Code (or run `/mcp`) afterwards. In the examples below `a2a-panel` stands for `node cli.js` if you installed from a clone. To remove it again, see [11. Uninstall](#11-uninstall).
+With npm: `npm install -g a2a-panel`, then `a2a-panel doctor` and `a2a-panel init`. Restart Claude Code (or run `/mcp`) afterwards. In the examples below `a2a-panel` stands for `node cli.js` if you installed from a clone. To remove it again, see [13. Uninstall](#13-uninstall).
 
 **Coming from `agy-bridge`?** This project used to be called `agy-bridge`. Run `a2a-panel init` (or `node cli.js init`) once: it removes the old `agy-bridge` MCP registration from Claude Code and registers `a2a-panel`. An npm install keeps using an existing `~/.agy-bridge` data folder, so your task history and presets stay. The short `a2a` command still works.
 
@@ -91,12 +91,13 @@ Tasks run `agy` with `--dangerously-skip-permissions`, because headless `agy` ca
 Claude Code automatically connects to the `a2a-panel` MCP server on startup once you have run `a2a-panel init`.
 It provides Claude Code with the following tools:
 
-- `a2a_dispatch_to_antigravity(role, task_description, workspace_path, mode, effort, model, conversation_id, acceptance_criteria, verification_command, preset, is_async)`
+- `a2a_dispatch_to_antigravity(role, task_description, workspace_path, mode, effort, model, conversation_id, acceptance_criteria, verification_command, preset, is_async, account)`
 - `a2a_list_expert_agents()`
+- `a2a_list_accounts()`
 - `a2a_list_presets()`
 - `a2a_get_task_status(task_id)`
 - `a2a_cancel_task(task_id)`
-- `a2a_validate_delivery(task_summary, acceptance_criteria, verification_command, workspace_path)`
+- `a2a_validate_delivery(task_summary, acceptance_criteria, verification_command, workspace_path, account)`
 
 ### In Claude Code, you can:
 > "Design the database schema, then delegate the API endpoints to the Antigravity api-engineer and have the test-engineer cover them."
@@ -126,11 +127,20 @@ a2a-panel autostart enable
 a2a-panel autostart            # status
 a2a-panel autostart disable
 
+# Manage signed-in accounts (see "6. Accounts")
+a2a-panel accounts                     # list
+a2a-panel accounts add work-claude --provider claude --label "Work Claude"
+a2a-panel accounts login work-claude
+a2a-panel accounts check work-claude
+a2a-panel accounts logout work-claude
+a2a-panel accounts delete work-claude
+
 # Dispatch a task directly from terminal
 a2a-panel run web-engineer "Create a user avatar component"
 a2a-panel run test-engineer "Write unit tests for the auth service"
 a2a-panel run code-reviewer "Review the latest changes in git"
 a2a-panel run web-engineer "Add a settings page" --preset my-team
+a2a-panel run web-engineer "Create avatar" --account work-claude
 
 # Manage preference presets (see "5. Presets")
 a2a-panel presets                      # list
@@ -148,9 +158,10 @@ When running `a2a-panel server start`:
 - **Agent Card**: `GET http://127.0.0.1:5188/.well-known/agent.json`
 - **Health Check**: `GET http://127.0.0.1:5188/health`
 - **List Roles**: `GET http://127.0.0.1:5188/roles`
-- **Dispatch Task**: `POST http://127.0.0.1:5188/tasks/send`. Optional `preset` (a preset id, or `null` / `"none"` for none; omitted means the default preset). JSON-RPC `message/send` takes the same field.
+- **Dispatch Task**: `POST http://127.0.0.1:5188/tasks/send`. Optional `preset` (a preset id, or `null` / `"none"` for none; omitted means the default preset) and optional `account` (account id). JSON-RPC `message/send` takes the same fields.
+- **Accounts** (panel API, token required for changes): `GET /api/accounts`, `POST /api/accounts` (`{id, provider, label?, model?}`), `PUT /api/accounts/:id`, `DELETE /api/accounts/:id`, `POST /api/accounts/:id/check`, `POST /api/accounts/:id/login`, `POST /api/accounts/:id/logout`, `GET /api/accounts/logins/:loginId`, `POST /api/accounts/logins/:loginId/code`, `POST /api/accounts/logins/:loginId/cancel`.
 - **Presets** (panel API, token required for changes): `GET /api/presets`, `POST /api/presets` (`{id, template?, from?, title?}`), `GET|PUT|DELETE /api/presets/:id`, `POST|DELETE /api/presets/:id/default`, and `POST /api/prompt-preview` (`{role, workspace, prompt, preset}`) to see the exact prompt.
-- **Task Status**: `GET http://127.0.0.1:5188/tasks/:id`. Returns status, output, `usage`, `verification`, `conversationId`, `changes` and `workspace`, so an async caller gets the same facts as a synchronous one. JSON-RPC `tasks/get` returns the same fields.
+- **Task Status**: `GET http://127.0.0.1:5188/tasks/:id`. Returns status, output, `usage`, `verification`, `conversationId`, `changes`, `workspace`, `account` and `provider`. JSON-RPC `tasks/get` returns the same fields.
 - **JSON-RPC 2.0**: `POST http://127.0.0.1:5188/rpc` with `message/send`, `tasks/get`, `tasks/list` and `tasks/cancel`. Streaming and push notifications are not implemented; the agent card says so.
 
 ---
@@ -329,7 +340,161 @@ The preset and the files a task received appear in the task list, the task detai
 
 <img src="docs/screenshots/16-presets-mobile.png" alt="Preset editor on mobile" width="320">
 
-## 6. Security model
+## 6. Accounts
+
+Run tasks on multiple signed-in accounts across three agent CLIs: Google Antigravity (`agy`), Claude Code (`claude`), and Codex (`codex`).
+
+Each account is bound to a provider and maintains its own isolated credentials, session state, and configuration directory.
+
+Logos for Antigravity and Codex come from the official editor extension on your machine when installed (nothing is bundled); Claude's logo is the Simple Icons glyph (CC0); otherwise a neutral mark is shown.
+
+### Built-in System Accounts
+
+Three built-in accounts represent your machine's default CLI sign-ins without environment overrides:
+- `agy`: Default Antigravity sign-in
+- `claude`: Default Claude Code sign-in
+- `codex`: Default Codex sign-in
+
+System accounts cannot be modified or deleted. When a task does not specify an account, it defaults to the built-in `agy` account.
+
+### Account Storage and Isolation
+
+Account configurations and profiles are stored under `accounts/` in the data directory (or `A2A_ACCOUNTS_DIR`), created with restricted `0700` directory permissions:
+- **Claude Code**: `accounts/<id>/claude` passed as `CLAUDE_CONFIG_DIR`. Tasks remove Anthropic environment tokens (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`) so the profile credentials are used.
+- **Codex**: `accounts/<id>/codex` passed as `CODEX_HOME`.
+- **Antigravity**: `accounts/<id>/home` passed as `HOME`. The account home links to every entry of your real home except `.gemini` and `Library`. Its `Library` is a real folder linking to your real `~/Library` items except `Keychains` and `Preferences`; its `Preferences` links to your real preferences except `com.apple.security.plist`; and on macOS it gets its own keychain at `Library/Keychains/login.keychain-db` (empty password, unlocked before each run, inside the `0700` account folder). `.gemini` holds only a link `config -> ~/.gemini/config`, so plugins and personas are shared while the sign-in is not.
+
+Adding an account always **adds** a sign-in next to the existing ones: it never replaces your default sign-in or another account's. Your real keychain, its search list and its settings are never modified.
+
+> **Limits of Antigravity isolation:** verified on macOS. On Linux, check that a new account shows signed out before you sign in. Added Antigravity accounts cannot use certificates from your real login keychain (for example iOS code signing); run signed builds on your default Antigravity account.
+
+### Signing In
+
+Use the web panel's Accounts view or the CLI to sign into accounts:
+
+- **Claude Code (`claude`)**: Browser login via `claude auth login`. In non-interactive contexts, it outputs a login URL and prompts for a verification code (`a2a-panel accounts login <id>` or through the panel dialog).
+- **Codex (`codex`)**: Browser login opens the OAuth flow and listens on `http://localhost:1455` (one active browser login session allowed at a time due to the fixed port). Codex also supports device code authentication (`--device-auth`) where a URL (`https://auth.openai.com/codex/device`) and a one-time code (e.g. `ABCD-EFGH2`) are displayed.
+- **Antigravity (`agy`)**: the panel shows the Google sign-in link; after you sign in, the page shows a code that you paste into the panel. agy only offers this in a terminal, so a2a-panel runs it in a pseudo-terminal (`script`). A Terminal-window sign-in is available as a fallback, and `a2a-panel accounts login <id>` signs in from your own terminal.
+
+### Names and Profile Pictures
+
+Account cards show the account's real name and email where the provider makes them available:
+
+| Provider | Name | Email | Photo |
+|---|---|---|---|
+| Antigravity | Google profile | yes | Google profile photo |
+| Codex | from the sign-in token | yes (and plan) | none |
+| Claude | none | from `claude auth status` | none |
+
+For Codex the name, email and plan are read locally from the id_token in that account's `auth.json`. For Antigravity the email is read from the stored sign-in, and the name and photo come from one request to Google's user-info endpoint with that account's own access token, made after a status check; if the token has expired, only the email is shown until agy has refreshed it. Tokens are never logged, stored elsewhere or returned by the API; only name, email, plan and the photo are saved. A picture you upload always takes precedence, and removing it shows the provider photo again.
+
+Each account can have a custom avatar picture (PNG, JPEG, WebP, max 512 KB) uploaded via the panel UI or `PUT /api/accounts/:id/avatar`. Uploaded images are validated against their magic byte signatures, stored in `accounts/<id>/avatar.<ext>` (or `accounts/.avatars/<id>.<ext>` for built-in accounts), and served with `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'`, and `Cache-Control: no-cache` headers. Deleting an account removes its picture.
+
+### Usage & Budgets
+
+The panel tracks token usage across tasks and monitors provider plan quotas and user-defined token budgets:
+
+- **Provider Quotas**:
+  - **Claude Code**: Captures rate limit events and displays unified windows (`5-hour`, `7-day`, `7-day Opus`, `7-day Sonnet`) with utilization percentages and reset times. Status turns `limited` if rate limit status is not allowed or the task encounters a usage limit error.
+  - **Codex**: Reads rate limits from the task's own session rollout file under `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*-<thread_id>.jsonl` with `5-hour` and `Weekly` windows. Status turns `limited` when a rate limit reached type is reported.
+  - **Antigravity**: Antigravity reports token usage only (no proactive quota API); tasks failing with quota exhaustion or resource capacity errors mark the account as `limited`.
+- **Token Budgets**:
+  - Configure period budgets per account (`day`, `week`, or `month`) with a token threshold (minimum 1,000 tokens). Periods start at 00:00 local time (day: today, week: Monday, month: 1st of month).
+  - Set `stop: true` to enforce hard stops: tasks dispatched to that account are refused before spawning if the period budget is exhausted.
+  - CLI: `a2a-panel accounts budget <id> --period day|week|month --tokens N [--stop]` and `a2a-panel accounts budget <id> --clear`.
+- **Cost Caveat**:
+  - Reported cost values represent API list-price equivalents (e.g. from Claude's `total_cost_usd` or `modelUsage`). Subscriptions are billed per plan, not per token.
+- **MCP Tool `a2a_account_usage`**:
+  - Summarizes usage, quota windows, and budget capacity for each configured account in a single line, allowing a coordinating leader to pick an account with available room.
+
+### CLI Account Commands
+
+```bash
+a2a-panel accounts                     # list accounts and their status
+a2a-panel accounts add my-claude --provider claude --label "Personal Claude"
+a2a-panel accounts login my-claude     # start sign-in flow
+a2a-panel accounts check my-claude     # check sign-in status against provider CLI
+a2a-panel accounts budget my-claude --period day --tokens 50000 --stop
+a2a-panel accounts budget my-claude --clear
+a2a-panel accounts logout my-claude    # sign out
+a2a-panel accounts delete my-claude    # remove account and its profile folder
+a2a-panel usage --days 30              # token usage totals, quota windows and budgets
+```
+
+## 7. Teams
+
+A **Team** organizes coding work by separating the planning and execution into distinct accounts:
+- **Leader account**: Read-only, turns a goal into a short task plan (and optionally reviews the final work). It runs with `persona: false` and minimal output to keep planning token-efficient.
+- **Member accounts (developers)**: Specialist accounts (`agy`, `claude`, `codex`) that code and test specific tasks using their own quotas. Each developer only receives its own task prompt, acceptance criteria, overall goal, and outputs from tasks it explicitly depends on.
+
+### Why Teams Save Tokens
+
+In traditional multi-agent orchestration, the orchestrator keeps all agent context, file contents, and intermediate test runs in its context window, rapidly consuming context and token quota. With Teams:
+1. The **leader** only produces a structured JSON plan (and a concise final review if requested).
+2. Each **developer** spends its own isolated provider quota and sees only what it needs to execute its assigned task.
+3. Intermediate file changes, logs, and tool calls never re-enter the leader's context window.
+
+### Example: Claude Leads iOS Development with Two Antigravity Developers
+
+Imagine an iOS app project where you want Claude Code to architect and coordinate tasks, while two Antigravity developer accounts do the actual Swift and UI implementation:
+
+```json
+{
+  "id": "ios-squad",
+  "name": "iOS Squad",
+  "description": "Native iOS Swift & SwiftUI engineering squad",
+  "leader": {
+    "account": "claude",
+    "model": null,
+    "effort": "medium",
+    "instructions": "Decompose into standalone SwiftUI and core data tasks."
+  },
+  "members": [
+    { "account": "agy-dev1", "roles": ["mobile-engineer"], "notes": "SwiftUI and view models" },
+    { "account": "agy-dev2", "roles": ["test-engineer", "api-engineer"], "notes": "Networking and unit tests" }
+  ],
+  "workspace": "/Users/developer/projects/MyApp",
+  "maxParallel": 2,
+  "review": true
+}
+```
+
+### Plan-First vs. Plan-and-Build
+
+- **Plan-first (`mode: "plan"`)**: The leader generates the task plan and stops at status `planned`. You can inspect the task breakdown, assignees, and dependencies before executing with `a2a-panel teams execute <runId>` or through the web dashboard.
+- **Plan-and-build (`mode: "accept-edits"`)**: The leader generates the plan and the scheduler immediately starts executing tasks across available members as dependencies are satisfied.
+
+### Concurrency and the Same-Folder Warning
+
+- `maxParallel` (1 to 4, default 1): Limits how many developer tasks run concurrently.
+- **Same-folder warning**: Tasks that do not have `depends_on` relationships can run simultaneously in the same workspace directory. To prevent conflicting edits to the same files, assign developers separate files or chain dependent tasks using `depends_on`.
+
+### Leader Review
+
+When `review: true` is enabled and at least one task completes, the leader runs a review step upon task completion. The leader inspects `git status` and `git diff --stat` (max 2000 characters) and returns a verdict (`Verdict: ACCEPTED` or `Verdict: REVISION NEEDED`) with up to 10 findings.
+
+### CLI Team Commands
+
+```bash
+a2a-panel teams                                   # list configured developer teams
+a2a-panel teams show ios-squad                    # inspect team configuration
+a2a-panel teams new ios-squad --file team.json    # create team from JSON file
+a2a-panel teams delete ios-squad                  # delete team
+a2a-panel teams run ios-squad "Add dark mode"     # run team (foreground progress tracking)
+a2a-panel teams run ios-squad "Add dark mode" --plan # plan only
+a2a-panel teams runs                              # list recent team runs
+a2a-panel teams execute <runId>                   # execute a planned run
+```
+
+### MCP Tools for Claude Code
+
+When connected via MCP, Claude Code can inspect and drive teams using:
+- `a2a_list_teams()`: List configured teams, their leaders, and member roles.
+- `a2a_run_team(team, goal, workspace_path, mode, is_async)`: Start a team run (returns a compact summary to save tokens).
+- `a2a_get_team_run(run_id)`: Check plan progress, task statuses, token counts, and review results.
+- `a2a_cancel_team_run(run_id)`: Cancel an active team run and its running developer tasks.
+
+## 8. Security model
 
 - The server only answers requests whose `Host` header is `127.0.0.1`, `localhost` or `[::1]` on the server port (blocks DNS rebinding).
 - No CORS headers are sent.
@@ -339,7 +504,7 @@ The preset and the files a task received appear in the task list, the task detai
 - Cancel stops the whole agent process group (SIGTERM, then SIGKILL after 5 seconds). Tasks started before this version run without their own process group, so cancel stops the agent and its descendants by walking the process tree.
 - Panel dispatch defaults to "Plan only". "Edit files" lets the agent edit files and run commands in the chosen workspace.
 
-## 7. Limits
+## 9. Limits
 
 Set these environment variables for the server, the MCP server and the CLI. `0` turns a limit off.
 
@@ -355,16 +520,16 @@ Set these environment variables for the server, the MCP server and the CLI. `0` 
 
 A stopped task shows `failed` with the reason (`Timed out after …` or `No output for …`).
 
-## 8. Usage tracking and sessions
+## 10. Usage tracking and sessions
 
-Tasks run with `--output-format stream-json`. The bridge turns the event stream into readable text, and records the token usage `agy` reports.
+Tasks run with `--output-format stream-json` (or JSONL streaming for Claude Code and Codex). The bridge turns the event stream into readable text, and records token usage per task and per account.
 
-- `a2a-panel usage` shows totals and a per-role breakdown, read from `logs/usage.jsonl`. The same data is at `GET /api/usage`.
+- `a2a-panel usage` shows totals, a per-role breakdown, and a per-account breakdown, read from `logs/usage.jsonl`. The same data is at `GET /api/usage`.
 - Each synchronous MCP result ends with the task's token usage, its conversation id, and `git status` / `git diff --stat` of the workspace, so you can check the work without reading the agent's account.
-- Pass `conversation_id` (from an earlier result) to continue that Antigravity conversation instead of resending context. Pass `model` to pick a model from `agy models`.
-- A run whose final status from `agy` is not `SUCCESS` is marked failed.
+- Pass `conversation_id` (from an earlier result) to continue that conversation instead of resending context. Pass `model` to pick a model.
+- A run whose final status from the agent is not `SUCCESS` is marked failed.
 
-## 9. Verification gate
+## 11. Verification gate
 
 If a task has a `verification_command` (MCP tool, `/tasks/send`, or JSON-RPC `message/send`), the agent is told to run it, and then **the bridge runs it again itself** in the workspace once the agent has finished successfully.
 
@@ -376,15 +541,17 @@ If a task has a `verification_command` (MCP tool, `/tasks/send`, or JSON-RPC `me
 
 A passing command only proves what that command checks. If the agent also wrote the tests, a green run says little, so review the diff too.
 
-## 10. Tests
+## 12. Tests
 
 ```bash
-node --test test/server.test.js
+npm test
+# or:
+node --test test/server.test.js test/accounts.test.js test/teams.test.js
 ```
 
-The tests start a server on a random port with a fake agent binary, a temporary logs directory and a temporary token, so they use no agent quota and leave no history behind.
+The tests start a server on a random port with fake agent binaries, a temporary accounts directory, a temporary logs directory and a temporary token, so they use no agent quota and leave no history behind.
 
-## 11. Uninstall
+## 13. Uninstall
 
 Run the steps in this order: the first ones use the `a2a-panel` command, which the later ones remove.
 

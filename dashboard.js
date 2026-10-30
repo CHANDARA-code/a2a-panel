@@ -1,7 +1,13 @@
 const fs = require('fs');
 const path = require('path');
+const { execFileSync } = require('child_process');
 const { getAgentCard, buildTaskPrompt, runAgyTask, cancelTask, isTaskProcessLive, readUsageTotals, LOGS_DIR, TASK_ID_PATTERN } = require('./dispatcher');
 const presets = require('./presets');
+const accounts = require('./accounts');
+const providers = require('./providers');
+const accountLogin = require('./account-login');
+const teams = require('./teams');
+const { findProviderIcon } = require('./provider-icons');
 
 const BASE_PATH = '/dashboard';
 const DIST_DIR = path.join(__dirname, 'panel', 'dist');
@@ -154,6 +160,8 @@ function parseLog(id, headBytes = HEAD_BYTES) {
   return {
     id,
     role: grab(/^Role: (.*)$/m),
+    account: grab(/^Account: (.*)$/m) || null,
+    provider: grab(/^Provider: (.*)$/m) || null,
     workspace: grab(/^Workspace: (.*)$/m),
     preset: ['', 'none'].includes(grab(/^Preset: (.*)$/m)) ? null : grab(/^Preset: (.*)$/m),
     preferences: ['', 'none'].includes(grab(/^Preferences: (.*)$/m)) ? [] : grab(/^Preferences: (.*)$/m).split(', '),
@@ -227,6 +235,9 @@ function validateDispatch(body) {
   if (body.mode !== undefined && !MODES.includes(body.mode)) return 'Unsupported mode';
   if (body.effort !== undefined && !EFFORTS.includes(body.effort)) return 'Unsupported effort';
   if (body.preset !== undefined && body.preset !== null && typeof body.preset !== 'string') return 'preset must be a preset id, or null for none';
+  if (body.account !== undefined && body.account !== null) {
+    if (typeof body.account !== 'string' || !accounts.getAccount(body.account)) return 'Unknown account';
+  }
   return null;
 }
 
@@ -248,7 +259,8 @@ async function dispatch(req, res) {
       effort: body.effort || 'high',
       model: body.model,
       conversation_id: body.conversation_id,
-      preset: body.preset
+      preset: body.preset,
+      account: body.account
     });
     return sendJson(res, 202, { taskId, status: 'running' });
   } catch (err) {
@@ -331,6 +343,367 @@ async function handlePresets(req, res, method, pathname) {
   return true;
 }
 
+function decorateAccount(acc) {
+  const { getBudgetUsed } = require('./usage');
+  const usage = readUsageTotals();
+  const byAccount = usage.byAccount || {};
+  const u = byAccount[acc.id] || { tasks: 0, total_tokens: 0 };
+  return {
+    ...acc,
+    system: Boolean(acc.system),
+    usage: { tasks: u.tasks, total_tokens: u.total_tokens },
+    budget: acc.budget || null,
+    limits: acc.limits || null,
+    budgetUsed: acc.budget ? getBudgetUsed(acc) : null,
+    avatarUrl: acc.avatarUrl || null
+  };
+}
+
+async function handleAccounts(req, res, method, pathname) {
+  if (!pathname.startsWith('/api/accounts')) return false;
+
+  const run = async (fn) => {
+    try {
+      await fn();
+    } catch (err) {
+      if (err instanceof accounts.AccountError) return sendJson(res, err.code, { error: err.message });
+      return sendJson(res, err.message === 'Payload too large' || err.message === 'Invalid JSON' ? 400 : 500, { error: err.message });
+    }
+  };
+
+  const loginMatch = pathname.match(/^\/api\/accounts\/logins\/([\w-]+)(?:\/(code|cancel))?$/);
+  if (loginMatch) {
+    const [, loginId, action] = loginMatch;
+    if (method === 'GET' && !action) {
+      await run(() => {
+        const login = accountLogin.getLogin(loginId);
+        if (!login) return sendJson(res, 404, { error: 'Login session not found' });
+        sendJson(res, 200, { login });
+      });
+      return true;
+    }
+    if (method === 'POST' && action === 'code') {
+      await run(async () => {
+        const body = await readJson(req);
+        const login = accountLogin.submitCode(loginId, body.code);
+        sendJson(res, 200, { login });
+      });
+      return true;
+    }
+    if (method === 'POST' && action === 'cancel') {
+      await run(() => {
+        const login = accountLogin.cancelLogin(loginId);
+        sendJson(res, 200, { login });
+      });
+      return true;
+    }
+    sendJson(res, 405, { error: 'Method not allowed' });
+    return true;
+  }
+
+  const avatarMatch = pathname.match(/^\/api\/accounts\/([\w-]+)\/avatar$/);
+  if (avatarMatch) {
+    const [, targetId] = avatarMatch;
+    if (method === 'GET') {
+      const account = accounts.getAccount(targetId);
+      if (!account) return sendJson(res, 404, { error: 'Account not found' });
+      const info = accounts.getAvatarFileInfo(targetId, Boolean(account.system));
+      if (!info) return sendJson(res, 404, { error: 'No avatar found' });
+      try {
+        const bytes = fs.readFileSync(info.path);
+        res.writeHead(200, {
+          'Content-Type': info.contentType,
+          'Content-Length': bytes.length,
+          'X-Content-Type-Options': 'nosniff',
+          'Content-Security-Policy': "default-src 'none'",
+          'Cache-Control': 'no-cache'
+        });
+        res.end(bytes);
+      } catch (err) {
+        return sendJson(res, 404, { error: 'Could not read avatar' });
+      }
+      return true;
+    }
+    if (method === 'PUT') {
+      await run(async () => {
+        const body = await readJson(req);
+        if (!body || typeof body.image !== 'string') {
+          return sendJson(res, 400, { error: 'Missing image data URL' });
+        }
+        const updated = accounts.saveAvatar(targetId, body.image);
+        sendJson(res, 200, { account: decorateAccount(updated) });
+      });
+      return true;
+    }
+    if (method === 'DELETE') {
+      await run(() => {
+        const updated = accounts.deleteAvatar(targetId);
+        sendJson(res, 200, { account: decorateAccount(updated) });
+      });
+      return true;
+    }
+    sendJson(res, 405, { error: 'Method not allowed' });
+    return true;
+  }
+
+  const budgetMatch = pathname.match(/^\/api\/accounts\/([\w-]+)\/budget$/);
+  if (budgetMatch) {
+    const [, targetId] = budgetMatch;
+    if (method === 'PUT') {
+      await run(async () => {
+        const body = await readJson(req);
+        if (!body || typeof body !== 'object') {
+          return sendJson(res, 400, { error: 'Invalid request body' });
+        }
+        const { period, tokens, stop } = body;
+        if (!['day', 'week', 'month'].includes(period)) {
+          return sendJson(res, 400, { error: 'Period must be day, week, or month' });
+        }
+        if (!Number.isInteger(tokens) || tokens < 1000) {
+          return sendJson(res, 400, { error: 'Tokens must be an integer >= 1000' });
+        }
+        if (typeof stop !== 'boolean') {
+          return sendJson(res, 400, { error: 'Stop must be a boolean' });
+        }
+        const updated = accounts.setAccountBudget(targetId, { period, tokens, stop });
+        sendJson(res, 200, { account: decorateAccount(updated) });
+      });
+      return true;
+    }
+    if (method === 'DELETE') {
+      await run(() => {
+        const updated = accounts.setAccountBudget(targetId, null);
+        sendJson(res, 200, { account: decorateAccount(updated) });
+      });
+      return true;
+    }
+    sendJson(res, 405, { error: 'Method not allowed' });
+    return true;
+  }
+
+  const accountMatch = pathname.match(/^\/api\/accounts(?:\/([\w-]+)(?:\/(check|login|logout))?)?$/);
+  if (!accountMatch) return false;
+  const [, id, action] = accountMatch;
+
+  if (!id && method === 'GET') {
+    await run(() => {
+      const accs = accounts.listAccounts().map(decorateAccount);
+      const provs = Object.values(providers.PROVIDERS).map((p) => {
+        const bin = providers.resolveBin(p.id);
+        let installed = false;
+        try {
+          fs.accessSync(bin, fs.constants.X_OK);
+          installed = true;
+        } catch (err) {}
+        const icon = findProviderIcon(p.id);
+        return {
+          id: p.id,
+          name: p.name,
+          installed,
+          bin,
+          loginMethods: p.loginMethods,
+          canLogout: p.canLogout,
+          iconUrl: icon ? `/api/providers/${p.id}/icon` : null
+        };
+      });
+      sendJson(res, 200, { accounts: accs, providers: provs });
+    });
+    return true;
+  }
+
+  if (!id && method === 'POST') {
+    await run(async () => {
+      const body = await readJson(req);
+      const account = accounts.createAccount(body);
+      sendJson(res, 201, { account: decorateAccount(account) });
+    });
+    return true;
+  }
+
+  if (id && !action && method === 'PUT') {
+    await run(async () => {
+      const body = await readJson(req);
+      const account = accounts.updateAccount(id, body);
+      sendJson(res, 200, { account: decorateAccount(account) });
+    });
+    return true;
+  }
+
+  if (id && !action && method === 'DELETE') {
+    await run(() => {
+      accounts.deleteAccount(id);
+      sendJson(res, 200, { deleted: id });
+    });
+    return true;
+  }
+
+  if (id && action === 'check' && method === 'POST') {
+    await run(async () => {
+      const account = await accounts.checkAccount(id);
+      sendJson(res, 200, { account: decorateAccount(account) });
+    });
+    return true;
+  }
+
+  if (id && action === 'login' && method === 'POST') {
+    await run(async () => {
+      const body = await readJson(req);
+      const login = accountLogin.startLogin(id, body.method);
+      sendJson(res, 202, { login });
+    });
+    return true;
+  }
+
+  if (id && action === 'logout' && method === 'POST') {
+    await run(() => {
+      const account = accounts.getAccount(id);
+      if (!account) return sendJson(res, 404, { error: `Account "${id}" not found` });
+      if (account.provider === 'agy') {
+        return sendJson(res, 400, { error: 'Antigravity has no sign-out command; delete the account to remove its sign-in' });
+      }
+      const args = providers.logoutArgs(account.provider);
+      const bin = providers.resolveBin(account.provider);
+      try {
+        execFileSync(bin, args, { env: accounts.accountEnv(account), stdio: ['ignore', 'pipe', 'pipe'] });
+      } catch (err) {}
+      accounts.markSignedOut(id, 'Logged out');
+      sendJson(res, 200, { account: decorateAccount(accounts.getAccount(id)) });
+    });
+    return true;
+  }
+
+  sendJson(res, 405, { error: 'Method not allowed' });
+  return true;
+}
+
+async function handleTeams(req, res, method, pathname) {
+  if (!pathname.startsWith('/api/teams')) return false;
+
+  const run = async (fn) => {
+    try {
+      await fn();
+    } catch (err) {
+      if (err instanceof teams.TeamError) return sendJson(res, err.code, { error: err.message });
+      return sendJson(res, err.message === 'Payload too large' || err.message === 'Invalid JSON' ? 400 : 500, { error: err.message });
+    }
+  };
+
+  const runsMatch = pathname.match(/^\/api\/teams\/([\w-]+)\/runs$/);
+  if (runsMatch) {
+    const [, teamId] = runsMatch;
+    if (method === 'POST') {
+      await run(async () => {
+        const body = await readJson(req);
+        const teamRun = teams.startRun({ teamId, ...body });
+        sendJson(res, 202, { run: teamRun });
+      });
+      return true;
+    }
+    sendJson(res, 405, { error: 'Method not allowed' });
+    return true;
+  }
+
+  const teamMatch = pathname.match(/^\/api\/teams(?:\/([\w-]+))?$/);
+  if (!teamMatch) return false;
+  const [, id] = teamMatch;
+
+  if (!id && method === 'GET') {
+    await run(() => sendJson(res, 200, { teams: teams.listTeams() }));
+    return true;
+  }
+
+  if (!id && method === 'POST') {
+    await run(async () => {
+      const body = await readJson(req);
+      const team = teams.createTeam(body);
+      sendJson(res, 201, { team });
+    });
+    return true;
+  }
+
+  if (id && method === 'GET') {
+    await run(() => sendJson(res, 200, { team: teams.getTeam(id) }));
+    return true;
+  }
+
+  if (id && method === 'PUT') {
+    await run(async () => {
+      const body = await readJson(req);
+      const team = teams.updateTeam(id, body);
+      sendJson(res, 200, { team });
+    });
+    return true;
+  }
+
+  if (id && method === 'DELETE') {
+    await run(() => {
+      teams.deleteTeam(id);
+      sendJson(res, 200, { deleted: id });
+    });
+    return true;
+  }
+
+  sendJson(res, 405, { error: 'Method not allowed' });
+  return true;
+}
+
+async function handleTeamRuns(req, res, method, pathname) {
+  if (!pathname.startsWith('/api/team-runs')) return false;
+
+  const run = async (fn) => {
+    try {
+      await fn();
+    } catch (err) {
+      if (err instanceof teams.TeamError) return sendJson(res, err.code, { error: err.message });
+      return sendJson(res, err.message === 'Payload too large' || err.message === 'Invalid JSON' ? 400 : 500, { error: err.message });
+    }
+  };
+
+  const runMatch = pathname.match(/^\/api\/team-runs(?:\/([\w-]+)(?:\/(execute|cancel))?)?$/);
+  if (!runMatch) return false;
+  const [, runId, action] = runMatch;
+
+  if (!runId && method === 'GET') {
+    await run(() => {
+      let teamId = undefined;
+      try {
+        const parsed = new URL(req.url, 'http://127.0.0.1');
+        teamId = parsed.searchParams.get('team') || undefined;
+      } catch (err) {}
+      const runs = teams.listRuns({ teamId, limit: 50 });
+      sendJson(res, 200, { runs });
+    });
+    return true;
+  }
+
+  if (runId && !action && method === 'GET') {
+    await run(() => {
+      const teamRun = teams.getRun(runId);
+      sendJson(res, 200, { run: teamRun });
+    });
+    return true;
+  }
+
+  if (runId && action === 'execute' && method === 'POST') {
+    await run(() => {
+      const teamRun = teams.executeRun(runId);
+      sendJson(res, 200, { run: teamRun });
+    });
+    return true;
+  }
+
+  if (runId && action === 'cancel' && method === 'POST') {
+    await run(() => {
+      const teamRun = teams.cancelRun(runId);
+      sendJson(res, 200, { run: teamRun });
+    });
+    return true;
+  }
+
+  sendJson(res, 405, { error: 'Method not allowed' });
+  return true;
+}
+
 function serveTaskLog(res, id) {
   const full = path.join(LOGS_DIR, `${id}.log`);
   if (!fs.existsSync(full)) return sendText(res, 404, 'Not found');
@@ -398,6 +771,23 @@ async function handle(req, res, pathname, { token }) {
     return true;
   }
 
+  if (method === 'GET' && pathname === '/api/usage/accounts') {
+    const url = new URL(req.url, 'http://' + (req.headers.host || '127.0.0.1'));
+    const daysParam = url.searchParams.get('days');
+    let days = 30;
+    if (daysParam !== null) {
+      const parsed = parseInt(daysParam, 10);
+      if (!Number.isInteger(parsed) || parsed < 1 || parsed > 90 || String(parsed) !== daysParam.trim()) {
+        sendJson(res, 400, { error: 'Invalid days parameter (must be an integer 1..90)' });
+        return true;
+      }
+      days = parsed;
+    }
+    const { getAccountsUsageReport } = require('./usage');
+    sendJson(res, 200, getAccountsUsageReport(days));
+    return true;
+  }
+
   if (method === 'GET' && pathname === '/api/usage') {
     sendJson(res, 200, readUsageTotals());
     return true;
@@ -425,6 +815,41 @@ async function handle(req, res, pathname, { token }) {
 
   if (pathname === '/api/presets' || pathname.startsWith('/api/presets/')) {
     if (await handlePresets(req, res, method, pathname)) return true;
+  }
+
+  if (pathname === '/api/accounts' || pathname.startsWith('/api/accounts/')) {
+    if (await handleAccounts(req, res, method, pathname)) return true;
+  }
+
+  const iconMatch = pathname.match(/^\/api\/providers\/([\w-]+)\/icon$/);
+  if (iconMatch) {
+    const [, id] = iconMatch;
+    if (method !== 'GET' || !['agy', 'claude', 'codex'].includes(id)) {
+      sendJson(res, 404, { error: 'Not found' });
+      return true;
+    }
+    const icon = findProviderIcon(id);
+    if (!icon) {
+      sendJson(res, 404, { error: 'Icon not found' });
+      return true;
+    }
+    res.writeHead(200, {
+      'Content-Type': icon.contentType,
+      'Content-Length': icon.data.length,
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': "default-src 'none'",
+      'Cache-Control': 'max-age=3600'
+    });
+    res.end(icon.data);
+    return true;
+  }
+
+  if (pathname === '/api/teams' || pathname.startsWith('/api/teams/')) {
+    if (await handleTeams(req, res, method, pathname)) return true;
+  }
+
+  if (pathname === '/api/team-runs' || pathname.startsWith('/api/team-runs/')) {
+    if (await handleTeamRuns(req, res, method, pathname)) return true;
   }
 
   const taskMatch = pathname.match(/^\/api\/tasks\/([\w-]+)(?:\/(log|cancel))?$/);

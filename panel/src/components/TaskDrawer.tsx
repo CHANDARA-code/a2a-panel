@@ -6,6 +6,7 @@ import type { Task } from "../api";
 import { formatDateTime, formatDuration } from "../format";
 import { usePolling } from "../hooks";
 import { StatusTag } from "./StatusTag";
+import { AccountAvatar } from "./AccountAvatar";
 
 interface TaskDrawerProps {
   taskId: string | null;
@@ -101,6 +102,17 @@ export function TaskDrawer({ taskId, summary, isMobile, cancelling, onClose, onC
             column={{ xs: 1, md: 2 }}
             items={[
               { key: "id", label: "Task ID", span: { xs: 1, md: 2 }, children: <Typography.Text copyable code>{task.id}</Typography.Text> },
+              {
+                key: "account",
+                label: "Account",
+                span: { xs: 1, md: 2 },
+                children: (
+                  <Flex align="center" gap={8}>
+                    <AccountAvatar accountId={task.account ?? "agy"} size={20} />
+                    <Tag style={{ marginInlineEnd: 0 }}>{task.account ?? "agy"}</Tag>
+                  </Flex>
+                ),
+              },
               { key: "workspace", label: "Workspace", span: { xs: 1, md: 2 }, children: <Typography.Text copyable style={{ wordBreak: "break-all" }}>{task.workspace}</Typography.Text> },
               {
                 key: "preset",

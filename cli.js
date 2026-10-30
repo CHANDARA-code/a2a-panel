@@ -3,11 +3,14 @@
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
-const { spawn } = require('child_process');
+const { spawn, execFileSync } = require('child_process');
 const { DATA_DIR } = require('./config');
 const { getAgentCard, runAgyTask, cancelTask, activeTasks, readUsageTotals } = require('./dispatcher');
 const presets = require('./presets');
 const autostart = require('./autostart');
+const accounts = require('./accounts');
+const providers = require('./providers');
+const teams = require('./teams');
 
 const PORT = parseInt(process.env.A2A_PORT || '5188', 10);
 const HOST = process.env.A2A_HOST || '127.0.0.1';
@@ -26,10 +29,25 @@ Usage:
   a2a-panel tasks                     List all running & recent tasks (alias: ps)
   a2a-panel doctor                    Check Node, agy, sign-in, git, data folder and Claude Code setup
   a2a-panel init [--dry-run]          Register this bridge as an MCP server in Claude Code
-  a2a-panel usage                     Show Antigravity token usage totals (tokens kept off Claude's bill)
+  a2a-panel usage [--days N]          Show token usage totals, quota windows and budgets
   a2a-panel logs [taskId] [-f]        View or stream live logs of a task (or latest task)
   a2a-panel dashboard [--no-open]     Open the web task panel (monitor, dispatch, cancel)
   a2a-panel run <role> "<task prompt>"  Dispatch task to an Antigravity developer
+  a2a-panel accounts [list]           List signed-in accounts and status
+  a2a-panel accounts add <id> --provider <agy|claude|codex> [--label <l>] [--model <m>]
+  a2a-panel accounts budget <id> --period day|week|month --tokens N [--stop]
+  a2a-panel accounts budget <id> --clear
+  a2a-panel accounts login <id>       Sign in to an account in this terminal
+  a2a-panel accounts check <id>       Check account sign-in status
+  a2a-panel accounts logout <id>      Sign out of an account (Claude Code, Codex)
+  a2a-panel accounts delete <id>      Delete an account and its isolated profile
+  a2a-panel teams [list]              List configured developer teams
+  a2a-panel teams show <id>           Show team details, leader and members
+  a2a-panel teams new <id> --file <f> Create a team from a JSON definition file
+  a2a-panel teams delete <id>         Delete a team
+  a2a-panel teams run <id> "<goal>"   Run a team on a goal (--workspace, --plan)
+  a2a-panel teams runs                List recent team runs
+  a2a-panel teams execute <runId>     Execute a planned team run
   a2a-panel presets [list]            List preference presets (coding style, libraries, tech defaults)
   a2a-panel presets show <id>         Print a preset's markdown files
   a2a-panel presets templates         List the starter templates presets can be created from
@@ -51,6 +69,7 @@ Options for "a2a-panel run":
   --effort <effort>    Reasoning effort: low, medium, high (default), xhigh, max
   --async              Run in background and print task ID
   --preset <id|none>   Preference preset to include (defaults to the default preset)
+  --account <id>       Account to run the task on (defaults to "agy")
 
 Available Roles:
   web-engineer, api-engineer, mobile-engineer, desktop-engineer,
@@ -250,6 +269,7 @@ async function handleRun(args) {
   let effort = 'high';
   let isAsync = false;
   let preset;
+  let account;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--workspace' && args[i + 1]) {
@@ -263,6 +283,9 @@ async function handleRun(args) {
       i++;
     } else if (args[i] === '--preset' && args[i + 1]) {
       preset = args[i + 1];
+      i++;
+    } else if (args[i] === '--account' && args[i + 1]) {
+      account = args[i + 1];
       i++;
     } else if (args[i] === '--async') {
       isAsync = true;
@@ -294,13 +317,13 @@ async function handleRun(args) {
     process.exit(1);
   }
 
-  console.log(`\n\x1b[1m\x1b[34m[A2A Dispatch]\x1b[0m Assigning task to Antigravity \x1b[36m${role}\x1b[0m...`);
+  console.log(`\n\x1b[1m\x1b[34m[A2A Dispatch]\x1b[0m Assigning task to \x1b[36m${role}\x1b[0m on account \x1b[36m${account || 'agy'}\x1b[0m...`);
   console.log(`Workspace: ${workspace}`);
   console.log(`Mode: ${mode} | Effort: ${effort} | Preset: ${presetId || 'none'}`);
   console.log(`------------------------------------------------------------------------`);
 
   if (isAsync) {
-    const { taskId, taskRecord } = runAgyTask({ role, prompt, workspace, mode, effort, preset });
+    const { taskId, taskRecord } = runAgyTask({ role, prompt, workspace, mode, effort, preset, account });
     console.log(`Task dispatched in background.`);
     console.log(`Task ID: ${taskId}`);
     return;
@@ -323,6 +346,7 @@ async function handleRun(args) {
     mode,
     effort,
     preset,
+    account,
     onChunk: (chunk) => {
       process.stdout.write(chunk);
     },
@@ -455,9 +479,325 @@ async function handleTasks() {
   console.log(`Tip: Run "a2a logs <taskId> -f" to stream a task's real-time output.\n`);
 }
 
-function handleUsage() {
+async function handleAccounts(args) {
+  const [sub = 'list', id] = args;
+  try {
+    if (sub === 'list') {
+      const list = accounts.listAccounts();
+      console.log('\n--- Configured Accounts ---');
+      console.log('-------------------------------------------------------------------------------------------------');
+      console.log(`${'ID'.padEnd(16)} ${'PROVIDER'.padEnd(14)} ${'STATUS'.padEnd(14)} ${'LABEL'.padEnd(25)} DETAILS`);
+      console.log('-------------------------------------------------------------------------------------------------');
+      for (const a of list) {
+        const pName = (providers.PROVIDERS[a.provider] && providers.PROVIDERS[a.provider].name) || a.provider;
+        let coloredState = a.status.state;
+        if (a.status.state === 'signed-in') coloredState = `\x1b[32m${a.status.state}\x1b[0m`;
+        else if (a.status.state === 'signed-out') coloredState = `\x1b[31m${a.status.state}\x1b[0m`;
+        else if (a.status.state === 'error') coloredState = `\x1b[31m${a.status.state}\x1b[0m`;
+        console.log(`${a.id.padEnd(16)} ${pName.padEnd(14)} ${coloredState.padEnd(23)} ${a.label.slice(0, 24).padEnd(25)} ${a.status.detail || ''}`);
+      }
+      console.log('-------------------------------------------------------------------------------------------------\n');
+      return;
+    }
+    if (sub === 'add') {
+      if (!id) throw new Error('Usage: a2a-panel accounts add <id> --provider <agy|claude|codex> [--label <l>] [--model <m>]');
+      let provider = null;
+      let label = null;
+      let model = null;
+      for (let i = 2; i < args.length; i++) {
+        if (args[i] === '--provider' && args[i + 1]) {
+          provider = args[i + 1];
+          i++;
+        } else if (args[i] === '--label' && args[i + 1]) {
+          label = args[i + 1];
+          i++;
+        } else if (args[i] === '--model' && args[i + 1]) {
+          model = args[i + 1];
+          i++;
+        }
+      }
+      if (!provider) throw new Error('--provider is required (agy, claude, codex)');
+      const created = accounts.createAccount({ id, provider, label, model });
+      console.log(`Created account "${created.id}" for ${providers.PROVIDERS[created.provider].name}.`);
+      return;
+    }
+    if (sub === 'budget') {
+      if (!id) throw new Error('Usage: a2a-panel accounts budget <id> --period day|week|month --tokens N [--stop] | --clear');
+      const account = accounts.getAccount(id);
+      if (!account) throw new Error(`Account "${id}" not found`);
+      if (args.includes('--clear')) {
+        accounts.setAccountBudget(id, null);
+        console.log(`Cleared budget for account "${id}".`);
+        return;
+      }
+      let period = null;
+      let tokens = null;
+      let stop = false;
+      for (let i = 2; i < args.length; i++) {
+        if (args[i] === '--period' && args[i + 1]) {
+          period = args[i + 1];
+          i++;
+        } else if (args[i] === '--tokens' && args[i + 1]) {
+          tokens = parseInt(args[i + 1], 10);
+          i++;
+        } else if (args[i] === '--stop') {
+          stop = true;
+        }
+      }
+      if (!period || !['day', 'week', 'month'].includes(period)) {
+        throw new Error('Invalid or missing --period (must be day, week, or month)');
+      }
+      if (!tokens || !Number.isInteger(tokens) || tokens < 1000) {
+        throw new Error('Invalid or missing --tokens (must be an integer >= 1000)');
+      }
+      accounts.setAccountBudget(id, { period, tokens, stop });
+      console.log(`Set ${period} budget of ${tokens.toLocaleString('en-US')} tokens for account "${id}" (stop: ${stop ? 'on' : 'off'}).`);
+      return;
+    }
+    if (sub === 'login') {
+      if (!id) throw new Error('Usage: a2a-panel accounts login <id>');
+      const account = accounts.getAccount(id);
+      if (!account) throw new Error(`Account "${id}" not found`);
+      const env = accounts.accountEnv(account);
+      const bin = providers.resolveBin(account.provider);
+      if (account.provider === 'agy') {
+        console.log(`\nLaunching Antigravity sign-in for account "${id}".`);
+        console.log('Please sign in in the interactive interface, then quit the CLI to return here.\n');
+        execFileSync(bin, [], { env, stdio: 'inherit' });
+      } else {
+        const cmdArgs = providers.loginArgs(account.provider, 'terminal');
+        execFileSync(bin, cmdArgs, { env, stdio: 'inherit' });
+      }
+      const checked = await accounts.checkAccount(id);
+      if (checked.status.state === 'signed-in') {
+        account.signedInHere = true;
+        accounts.saveAccount(account);
+      }
+      console.log(`\nAccount "${id}" status: ${checked.status.state} (${checked.status.detail})\n`);
+      return;
+    }
+    if (sub === 'check') {
+      if (!id) throw new Error('Usage: a2a-panel accounts check <id>');
+      const checked = await accounts.checkAccount(id);
+      console.log(`\nAccount "${id}": ${checked.status.state} - ${checked.status.detail}`);
+      if (checked.status.warning) console.log(`Warning: ${checked.status.warning}`);
+      console.log();
+      return;
+    }
+    if (sub === 'logout') {
+      if (!id) throw new Error('Usage: a2a-panel accounts logout <id>');
+      const account = accounts.getAccount(id);
+      if (!account) throw new Error(`Account "${id}" not found`);
+      if (account.provider === 'agy') {
+        throw new Error('Antigravity has no sign-out command; delete the account to remove its sign-in');
+      }
+      const cmdArgs = providers.logoutArgs(account.provider);
+      const bin = providers.resolveBin(account.provider);
+      const env = accounts.accountEnv(account);
+      execFileSync(bin, cmdArgs, { env, stdio: 'inherit' });
+      accounts.markSignedOut(id, 'Logged out');
+      console.log(`Signed out account "${id}".`);
+      return;
+    }
+    if (sub === 'delete') {
+      if (!id) throw new Error('Usage: a2a-panel accounts delete <id>');
+      accounts.deleteAccount(id);
+      console.log(`Deleted account "${id}".`);
+      return;
+    }
+    throw new Error(`Unknown accounts command "${sub}". Use list, add, login, check, logout or delete.`);
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+async function followTeamRun(runId) {
+  let cancelled = false;
+  const onSigInt = () => {
+    if (cancelled) process.exit(130);
+    cancelled = true;
+    console.log(`\nCancelling team run "${runId}"...`);
+    try {
+      teams.cancelRun(runId);
+    } catch (err) {}
+  };
+  process.on('SIGINT', onSigInt);
+
+  const taskStates = new Map();
+  let lastStatus = null;
+  let lastReviewStatus = null;
+
+  while (true) {
+    let run;
+    try {
+      run = teams.getRun(runId);
+    } catch (err) {
+      break;
+    }
+
+    if (run.status !== lastStatus) {
+      if (lastStatus !== null) {
+        console.log(`[Run Status] ${lastStatus} -> ${run.status}`);
+      }
+      lastStatus = run.status;
+    }
+
+    if (run.tasks) {
+      for (const t of run.tasks) {
+        const key = t.id;
+        const prev = taskStates.get(key);
+        if (prev !== t.status) {
+          taskStates.set(key, t.status);
+          const errorMsg = t.error ? ` (${t.error})` : '';
+          console.log(`[Task ${t.id}] ${t.title} -> ${t.status} [${t.assignee} / ${t.role}]${errorMsg}`);
+        }
+      }
+    }
+
+    if (run.review && run.review.status !== lastReviewStatus) {
+      lastReviewStatus = run.review.status;
+      console.log(`[Review] Status: ${run.review.status}`);
+    }
+
+    if (['planned', 'completed', 'failed', 'cancelled', 'stale'].includes(run.status)) {
+      console.log(`\nTeam run finished with status: \x1b[1m${run.status.toUpperCase()}\x1b[0m`);
+      if (run.error) console.log(`Error: ${run.error}`);
+      if (run.summary) console.log(`Plan: ${run.summary}`);
+      if (run.review && run.review.output) console.log(`Review:\n${run.review.output}`);
+      console.log(`Total tokens: ${run.usage?.total_tokens || 0}\n`);
+      break;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+
+  process.removeListener('SIGINT', onSigInt);
+}
+
+async function handleTeams(args) {
+  const [sub = 'list', id, ...rest] = args;
+  const option = (name) => {
+    const index = rest.indexOf(name);
+    return index >= 0 ? rest[index + 1] : undefined;
+  };
+  try {
+    if (sub === 'list') {
+      const list = teams.listTeams();
+      if (!list.length) {
+        console.log('No teams configured yet.');
+        return;
+      }
+      console.log('\n--- Configured Developer Teams ---');
+      console.log('-------------------------------------------------------------------------------------------------');
+      console.log(`${'ID'.padEnd(16)} ${'NAME'.padEnd(25)} ${'LEADER'.padEnd(16)} ${'MEMBERS'.padEnd(10)} PARALLEL REVIEW`);
+      console.log('-------------------------------------------------------------------------------------------------');
+      for (const t of list) {
+        console.log(`${t.id.padEnd(16)} ${t.name.slice(0, 24).padEnd(25)} ${t.leader.account.padEnd(16)} ${String(t.members.length).padEnd(10)} ${String(t.maxParallel).padEnd(8)} ${t.review ? 'yes' : 'no'}`);
+      }
+      console.log('-------------------------------------------------------------------------------------------------\n');
+      return;
+    }
+
+    if (sub === 'show') {
+      if (!id) throw new Error('Usage: a2a-panel teams show <id>');
+      const t = teams.getTeam(id);
+      console.log(`\nTeam: ${t.name} (${t.id})`);
+      if (t.description) console.log(`Description: ${t.description}`);
+      console.log(`Leader: account=${t.leader.account}, model=${t.leader.model || 'default'}, effort=${t.leader.effort}`);
+      if (t.leader.instructions) console.log(`Instructions: ${t.leader.instructions}`);
+      console.log(`Workspace: ${t.workspace || '(none)'} | Preset: ${t.preset || 'default'} | MaxParallel: ${t.maxParallel} | Review: ${t.review}`);
+      console.log('Members:');
+      for (const m of t.members) {
+        console.log(`  - ${m.account}: roles=${m.roles && m.roles.length ? m.roles.join(', ') : 'any'}${m.notes ? ` (${m.notes})` : ''}`);
+      }
+      console.log();
+      return;
+    }
+
+    if (sub === 'new') {
+      if (!id) throw new Error('Usage: a2a-panel teams new <id> --file <team.json>');
+      const filePath = option('--file');
+      if (!filePath) throw new Error('--file <path> is required');
+      if (!fs.existsSync(filePath)) throw new Error(`File not found: ${filePath}`);
+      const raw = fs.readFileSync(filePath, 'utf-8');
+      let data;
+      try {
+        data = JSON.parse(raw);
+      } catch (err) {
+        throw new Error(`Invalid JSON in ${filePath}: ${err.message}`);
+      }
+      const created = teams.createTeam({ ...data, id });
+      console.log(`Created team "${created.id}" (${created.name}).`);
+      return;
+    }
+
+    if (sub === 'delete') {
+      if (!id) throw new Error('Usage: a2a-panel teams delete <id>');
+      teams.deleteTeam(id);
+      console.log(`Deleted team "${id}".`);
+      return;
+    }
+
+    if (sub === 'runs') {
+      const runs = teams.listRuns();
+      if (!runs.length) {
+        console.log('No team runs found.');
+        return;
+      }
+      console.log('\n--- Recent Team Runs ---');
+      console.log('-------------------------------------------------------------------------------------------------');
+      console.log(`${'RUN ID'.padEnd(25)} ${'TEAM'.padEnd(16)} ${'STATUS'.padEnd(12)} ${'TOKENS'.padEnd(10)} GOAL`);
+      console.log('-------------------------------------------------------------------------------------------------');
+      for (const r of runs) {
+        console.log(`${r.id.padEnd(25)} ${r.teamId.padEnd(16)} ${r.status.padEnd(12)} ${String(r.usage?.total_tokens || 0).padEnd(10)} ${r.goal.slice(0, 30)}`);
+      }
+      console.log('-------------------------------------------------------------------------------------------------\n');
+      return;
+    }
+
+    if (sub === 'execute') {
+      if (!id) throw new Error('Usage: a2a-panel teams execute <runId>');
+      let run = teams.executeRun(id);
+      console.log(`\nExecuting team run "${id}" (team: ${run.teamName})...`);
+      await followTeamRun(id);
+      return;
+    }
+
+    if (sub === 'run') {
+      if (!id) throw new Error('Usage: a2a-panel teams run <id> "<goal>" [--workspace <path>] [--plan]');
+      const goal = rest.find((arg) => !arg.startsWith('-')) || '';
+      if (!goal) throw new Error('Goal is required');
+      const workspace = option('--workspace');
+      const isPlan = rest.includes('--plan');
+      const mode = isPlan ? 'plan' : 'accept-edits';
+
+      const initialRun = teams.startRun({ teamId: id, goal, workspace, mode });
+      console.log(`\nStarted team run "${initialRun.id}" for team "${initialRun.teamName}" (mode: ${mode}).`);
+      await followTeamRun(initialRun.id);
+      return;
+    }
+
+    throw new Error(`Unknown teams command "${sub}". Use list, show, new, delete, run, runs or execute.`);
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+function handleUsage(args = []) {
+  let days = 30;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--days' && args[i + 1]) {
+      const parsed = parseInt(args[i + 1], 10);
+      if (Number.isInteger(parsed) && parsed >= 1 && parsed <= 90) {
+        days = parsed;
+      }
+      i++;
+    }
+  }
   const totals = readUsageTotals();
-  const fmt = (n) => n.toLocaleString('en-US');
+  const fmt = (n) => (typeof n === 'number' ? n.toLocaleString('en-US') : '0');
   console.log(`\nAntigravity usage across ${fmt(totals.tasks)} task(s)`);
   console.log(`  total     ${fmt(totals.total_tokens)}`);
   console.log(`  input     ${fmt(totals.input_tokens)}`);
@@ -469,6 +809,35 @@ function handleUsage() {
     console.log('\nBy role');
     for (const [role, info] of roles) {
       console.log(`  ${role.padEnd(26)} ${String(info.tasks).padStart(4)} task(s)  ${fmt(info.total_tokens)} tokens`);
+    }
+  }
+  const { getAccountsUsageReport } = require('./usage');
+  const report = getAccountsUsageReport(days);
+  if (report.accounts && report.accounts.length) {
+    console.log(`\nBy account (${days} days: ${report.from} to ${report.to})`);
+    for (const a of report.accounts) {
+      const pName = (providers.PROVIDERS[a.provider] && providers.PROVIDERS[a.provider].name) || a.provider;
+      console.log(`  ${a.id.padEnd(16)} (${pName}, ${a.label})`);
+      console.log(`    today: ${fmt(a.today.total_tokens)} tokens · 7 days: ${fmt(a.last7d.total_tokens)} tokens · ${days} days: ${fmt(a.totals.total_tokens)} tokens`);
+      if (a.limits && a.limits.windows && a.limits.windows.length) {
+        const winStrs = a.limits.windows.map((w) => {
+          let s = `${w.label}: ${w.usedPercent}%`;
+          if (w.resetsAt) {
+            const d = new Date(w.resetsAt);
+            const hh = String(d.getHours()).padStart(2, '0');
+            const mm = String(d.getMinutes()).padStart(2, '0');
+            s += ` (resets ${hh}:${mm})`;
+          }
+          return s;
+        });
+        console.log(`    quota:   ${winStrs.join(', ')}`);
+      } else if (a.limits && a.limits.status === 'limited') {
+        console.log(`    quota:   LIMITED (${a.limits.detail || 'limit reached'})`);
+      }
+      if (a.budget) {
+        const bUsed = a.budgetUsed ? `${a.budgetUsed.percent}% (${fmt(a.budgetUsed.tokens)} / ${fmt(a.budget.tokens)})` : `0% (0 / ${fmt(a.budget.tokens)})`;
+        console.log(`    budget:  ${bUsed} per ${a.budget.period}${a.budget.stop ? ' [enforced: stop on limit]' : ''}`);
+      }
     }
   }
   console.log('\nThese tokens ran on Antigravity, not in your Claude context. Claude only paid for the short result it read back.\n');
@@ -572,7 +941,7 @@ async function main() {
   }
 
   if (cmd === 'usage') {
-    handleUsage();
+    handleUsage(args.slice(1));
     return;
   }
 
@@ -600,6 +969,16 @@ async function main() {
 
   if (cmd === 'autostart') {
     await handleAutostart(args.slice(1));
+    return;
+  }
+
+  if (cmd === 'accounts' || cmd === 'account') {
+    await handleAccounts(args.slice(1));
+    return;
+  }
+
+  if (cmd === 'teams' || cmd === 'team') {
+    await handleTeams(args.slice(1));
     return;
   }
 

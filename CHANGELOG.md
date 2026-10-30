@@ -4,6 +4,36 @@ All notable changes to a2a-panel are listed here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+### Added
+
+- Multiple accounts per agent CLI: Antigravity (`agy`), Claude Code (`claude`) and Codex (`codex`), each isolated in its own folder (per-account `HOME`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME`). Your existing sign-ins appear as the built-in default accounts, and adding an account never replaces one.
+- Sign-in from the panel: Codex browser or device code, Claude browser with paste-code, Antigravity Google link with paste-code (run in a pseudo-terminal), and a Terminal-window fallback for all.
+- Tasks run on any account (`account` on the MCP dispatch tool, `/tasks/send`, JSON-RPC, the panel and `a2a-panel run --account`), with Claude Code and Codex stream parsing, per-account token usage, and accounts marked signed out when a task proves the sign-in is gone.
+- Per-account keychain and keychain settings for Antigravity accounts on macOS, so signing in never asks to reset your keychain.
+- Real names and photos on account cards: Google name and photo for Antigravity, name, email and plan from the Codex sign-in, email for Claude.
+- Add account with provider logos: one click creates the account and starts sign-in; unfinished sign-ins are removed. Antigravity and Codex logos come from their editor extensions on your machine (`GET /api/providers/:id/icon`); Claude's logo is the Simple Icons glyph (CC0).
+- Teams: a leader account plans a goal into tasks for member accounts and roles, with plan-first review (instructions and check commands shown before you build), dependencies, a parallel limit, optional leader review, MCP tools `a2a_list_teams`, `a2a_run_team`, `a2a_get_team_run`, `a2a_cancel_team_run` and `a2a-panel teams` commands.
+- MCP tool `a2a_list_accounts`; CLI `a2a-panel accounts` commands.
+- Per-account Usage Monitor (`usage.js`) tracking token budgets, usage records with models breakdown, and provider plan quota snapshots.
+- Quota snapshot extraction for Claude Code (`rate_limit_event` and `modelUsage`), Codex (`rate_limits` from task's own rollout file), and Antigravity (capacity exhaustion failure detection).
+- Account budgets with period windows (`day`, `week`, `month`) starting at 00:00 local time, and optional hard stop enforcement refusing tasks before spawn.
+- Account profile pictures (`PUT/GET/DELETE /api/accounts/:id/avatar`) with byte signature verification (PNG, JPEG, WebP, max 512 KB), isolated storage, strict security headers, and automatic deletion on account removal.
+- HTTP API endpoints `GET /api/usage/accounts`, `PUT /api/accounts/:id/budget`, `DELETE /api/accounts/:id/budget`, and avatar endpoints.
+- MCP tool `a2a_account_usage` reporting single-line account capacity and quota status.
+- CLI commands: `a2a-panel usage [--days N]` per-account breakdown and `a2a-panel accounts budget <id> (--period ... --tokens ... [--stop] | --clear)`.
+
+### Fixed
+
+- A task on a signed-out Antigravity account no longer waits at agy's sign-in prompt until the time limit.
+- A running verification command can be cancelled.
+- Sign-in codes are hidden from sign-in output for every provider; a sign-in that ignores SIGTERM is killed; a missing CLI no longer stops the server.
+- Codex keeps showing signed out after a task proves its stored sign-in was rejected, until you sign in again.
+- Leader-written verification commands run on the host only after explicit plan approval in plan-first mode, preventing untrusted command execution.
+- Path traversal through run IDs by validating `^run_\d+_[a-z0-9]+$` on all run endpoints and operations.
+- Scheduler deadlock by propagating skipped task dependencies until reaching a fixed point.
+- Stale overwrites in parallel task execution by maintaining a single active in-memory run state per process.
+- Team and run listings failing completely when any single file contains malformed JSON by skipping corrupt files in list functions.
+
 ## [0.2.0] - 2026-10-26
 
 ### Added
