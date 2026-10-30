@@ -3,10 +3,11 @@ import { Alert, App as AntApp, Button, Card, Collapse, Dropdown, Empty, Flex, Fo
 import type { MenuProps } from "antd";
 import { DeleteOutlined, EditOutlined, LoginOutlined, LogoutOutlined, MoreOutlined, PictureOutlined, PlusOutlined, ReloadOutlined } from "@ant-design/icons";
 import { accountDisplayName, accountEmail, api } from "../api";
-import type { Account, Provider, ProviderId } from "../api";
+import type { Account, LoginSession, Provider, ProviderId } from "../api";
+import { useServerEvent } from "../events";
 import { formatAgo, formatDateTime } from "../format";
 import { SignInModal } from "./SignInModal";
-import { AccountAvatar } from "./AccountAvatar";
+import { AccountAvatar, loadAccounts } from "./AccountAvatar";
 import { AvatarModal } from "./AvatarModal";
 import { ProviderIcon } from "./ProviderIcon";
 
@@ -42,8 +43,6 @@ interface EditFormValues {
 
 interface PendingAccountInfo {
   id: string;
-  autoLabel: string;
-  isAutoNamed: boolean;
   method?: string;
 }
 
@@ -74,7 +73,7 @@ export function AccountsView({ isMobile }: AccountsViewProps) {
 
   const refresh = useCallback(async () => {
     try {
-      const res = await api.accounts();
+      const res = await loadAccounts();
       setAccounts(res.accounts);
       setProviders(res.providers);
       setError(null);
@@ -174,11 +173,7 @@ export function AccountsView({ isMobile }: AccountsViewProps) {
       await refresh();
 
       const providerObj = providers.find((p) => p.id === created.provider) ?? prov;
-      setPendingNewAccount({
-        id: created.id,
-        autoLabel: finalLabel,
-        isAutoNamed: true,
-      });
+      setPendingNewAccount({ id: created.id });
       setSignInAutoStart(true);
       setSignInTarget({ account: created, provider: providerObj });
     } catch (err) {
@@ -215,11 +210,7 @@ export function AccountsView({ isMobile }: AccountsViewProps) {
         loginMethods: ["terminal"],
         canLogout: false,
       };
-      setPendingNewAccount({
-        id: created.id,
-        autoLabel: "",
-        isAutoNamed: false,
-      });
+      setPendingNewAccount({ id: created.id });
       setSignInAutoStart(true);
       setSignInTarget({ account: created, provider: prov });
     } catch (err) {
@@ -230,35 +221,29 @@ export function AccountsView({ isMobile }: AccountsViewProps) {
   };
 
   const handleSignInSuccess = async () => {
-    const currentPending = pendingNewAccount;
-    const res = await api.accounts();
-    setAccounts(res.accounts);
-    setProviders(res.providers);
-
-    if (currentPending) {
-      const refreshed = res.accounts.find((a) => a.id === currentPending.id);
-      if (
-        refreshed &&
-        refreshed.status?.email &&
-        currentPending.isAutoNamed &&
-        refreshed.label === currentPending.autoLabel
-      ) {
-        try {
-          await api.updateAccount(refreshed.id, { label: refreshed.status.email });
-          const updated = await api.accounts();
-          setAccounts(updated.accounts);
-          setProviders(updated.providers);
-        } catch {}
-      }
-      setPendingNewAccount(null);
-    }
+    setPendingNewAccount(null);
+    await refresh();
   };
 
-  const handleSignInClose = async () => {
+  const [finishingLoginId, setFinishingLoginId] = useState<string | null>(null);
+
+  useServerEvent("login", (data: { id: string; state: string }) => {
+    if (data.id !== finishingLoginId || data.state === "starting" || data.state === "waiting") return;
+    setFinishingLoginId(null);
+    refresh();
+  });
+
+  const handleSignInClose = async (session: LoginSession | null) => {
     const currentPending = pendingNewAccount;
     setSignInTarget(null);
     setSignInAutoStart(false);
     setPendingNewAccount(null);
+
+    if (currentPending && session?.verifying && session.state === "waiting") {
+      message.info("Finishing sign-in in the background.");
+      setFinishingLoginId(session.id);
+      return;
+    }
 
     if (currentPending && currentPending.method === "terminal") {
       message.info("Finish signing in in the Terminal window, then press Check on the account.");
@@ -268,7 +253,7 @@ export function AccountsView({ isMobile }: AccountsViewProps) {
 
     if (currentPending) {
       try {
-        const res = await api.accounts();
+        const res = await loadAccounts();
         const targetAcc = res.accounts.find((a) => a.id === currentPending.id);
         if (targetAcc && targetAcc.status?.state !== "signed-in") {
           await api.deleteAccount(currentPending.id);
@@ -423,7 +408,7 @@ export function AccountsView({ isMobile }: AccountsViewProps) {
 
   const confirmDelete = (acc: Account) => {
     modal.confirm({
-      title: `Delete ${acc.label}?`,
+      title: `Delete ${accountDisplayName(acc)}?`,
       content: "Its sign-in and picture are removed from this computer. Teams that use it must be changed first.",
       okText: "Delete",
       okButtonProps: { danger: true },
@@ -433,7 +418,7 @@ export function AccountsView({ isMobile }: AccountsViewProps) {
 
   const confirmLogout = (acc: Account, prov: Provider) => {
     modal.confirm({
-      title: acc.system ? `Sign out of your default ${prov.name} sign-in?` : `Sign out of ${acc.label}?`,
+      title: acc.system ? `Sign out of your default ${prov.name} sign-in?` : `Sign out of ${accountDisplayName(acc)}?`,
       content: acc.system
         ? `This signs ${prov.name} out on this computer, including when you use it outside a2a-panel.`
         : "You can sign in again at any time.",
@@ -480,7 +465,7 @@ export function AccountsView({ isMobile }: AccountsViewProps) {
     };
     actions.push(
       <Dropdown key="more" trigger={["click"]} menu={{ items, onClick: onMenuClick }}>
-        <Button type="link" size="small" icon={<MoreOutlined />} aria-label={`More actions for ${acc.label}`} loading={deletingIds.has(acc.id)} />
+        <Button type="link" size="small" icon={<MoreOutlined />} aria-label={`More actions for ${accountDisplayName(acc)}`} loading={deletingIds.has(acc.id)} />
       </Dropdown>,
     );
     return actions;
@@ -562,7 +547,7 @@ export function AccountsView({ isMobile }: AccountsViewProps) {
                           <button
                             type="button"
                             onClick={() => setAvatarAccount(acc)}
-                            aria-label={`Change picture for ${acc.label}`}
+                            aria-label={`Change picture for ${accountDisplayName(acc)}`}
                             style={{
                               padding: 0,
                               margin: 0,

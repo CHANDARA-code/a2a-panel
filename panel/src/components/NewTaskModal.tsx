@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Alert, App as AntApp, AutoComplete, Button, Drawer, Flex, Form, Input, Modal, Radio, Select, Tag, Typography, theme } from "antd";
 import { EyeOutlined, FileMarkdownOutlined } from "@ant-design/icons";
-import { api } from "../api";
+import { accountDisplayName, api } from "../api";
 import type { Account, DispatchInput, PresetSummary, PromptPreview, Provider, Role } from "../api";
 import { AccountStatusDot } from "./StatusTag";
 import { AccountAvatar } from "./AccountAvatar";
@@ -146,7 +146,7 @@ export function NewTaskModal({ open, isMobile, initial, onClose, onCreated }: Ne
         ),
         options: groupAccounts.map((a) => ({
           value: a.id,
-          label: a.label || a.id,
+          label: accountDisplayName(a),
           id: a.id,
           state: a.status?.state ?? "unknown",
         })),

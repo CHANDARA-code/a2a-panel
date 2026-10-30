@@ -15,7 +15,7 @@ import {
   Typography,
 } from "antd";
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
-import { api } from "../api";
+import { accountDisplayName, api } from "../api";
 import type { Account, PresetSummary, ProviderId, Role, Team, TeamMember } from "../api";
 import { AccountStatusDot } from "./StatusTag";
 import { AccountAvatar } from "./AccountAvatar";
@@ -140,7 +140,7 @@ export function TeamEditor({ open, team, accounts, isMobile, onClose, onSaved }:
         ),
         options: groupAccounts.map((a) => ({
           value: a.id,
-          label: a.label || a.id,
+          label: accountDisplayName(a),
           id: a.id,
           state: a.status?.state ?? "unknown",
         })),

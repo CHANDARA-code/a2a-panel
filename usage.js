@@ -228,6 +228,7 @@ function getAccountsUsageReport(days = 30, now = new Date()) {
       provider: acc.provider,
       label: acc.label,
       system: Boolean(acc.system),
+      identity: acc.identity || null,
       totals: accTotals,
       today: { tasks: todayTasks, total_tokens: todayTokens },
       last7d: { tasks: last7dTasks, total_tokens: last7dTokens },

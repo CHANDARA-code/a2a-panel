@@ -16,7 +16,7 @@ import {
 } from "antd";
 import type { TableColumnsType } from "antd";
 import { DeleteOutlined, EditOutlined, PlayCircleOutlined, PlusOutlined, UserOutlined } from "@ant-design/icons";
-import { api } from "../api";
+import { accountDisplayName, api } from "../api";
 import type { Account, Team, TeamRun } from "../api";
 import { formatAgo, formatDateTime } from "../format";
 import { useServerEvent } from "../events";
@@ -244,7 +244,7 @@ export function TeamsView({ isMobile, onOpenTask }: TeamsViewProps) {
                     </Typography.Text>
                     <AccountAvatar account={leaderAcc} accountId={team.leader.account} accounts={accounts} size={20} />
                     <Typography.Text style={{ fontSize: 12, fontWeight: 500 }}>
-                      {leaderAcc?.label || team.leader.account}
+                      {leaderAcc ? accountDisplayName(leaderAcc) : team.leader.account}
                     </Typography.Text>
                     <Tag color="blue" style={{ marginInlineEnd: 0, fontSize: 11 }}>
                       {leaderAcc?.provider ?? "agy"}

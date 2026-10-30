@@ -24,7 +24,7 @@ import type { TeamRun, TeamRunTask } from "../api";
 import { formatDateTime } from "../format";
 import { useServerEvent } from "../events";
 import { TeamRunStatusTag, TeamTaskStatusTag } from "./StatusTag";
-import { AccountAvatar } from "./AccountAvatar";
+import { AccountAvatar, AccountName } from "./AccountAvatar";
 
 function TaskPlanDetails({ task }: { task: TeamRunTask }) {
   return (
@@ -166,7 +166,7 @@ export function TeamRunDrawer({ runId, open, isMobile, onClose, onOpenTask }: Te
       render: (assignee: string) => (
         <Flex align="center" gap={6}>
           <AccountAvatar accountId={assignee} size={20} />
-          <Tag style={{ marginInlineEnd: 0 }}>{assignee}</Tag>
+          <Tag style={{ marginInlineEnd: 0 }} title={assignee}><AccountName accountId={assignee} /></Tag>
         </Flex>
       ),
     },
@@ -275,7 +275,7 @@ export function TeamRunDrawer({ runId, open, isMobile, onClose, onOpenTask }: Te
                   <Flex align="center" gap={8} wrap>
                     <Flex align="center" gap={6}>
                       <AccountAvatar accountId={run.leader.account} size={20} />
-                      <Tag style={{ marginInlineEnd: 0 }}>{run.leader.account}</Tag>
+                      <Tag style={{ marginInlineEnd: 0 }} title={run.leader.account}><AccountName accountId={run.leader.account} /></Tag>
                     </Flex>
                     {run.leader.taskId ? (
                       <Button
@@ -370,7 +370,7 @@ export function TeamRunDrawer({ runId, open, isMobile, onClose, onOpenTask }: Te
                     <Flex gap={6} wrap align="center" style={{ marginTop: 6 }}>
                       <Flex align="center" gap={4}>
                         <AccountAvatar accountId={task.assignee} size={20} />
-                        <Tag style={{ marginInlineEnd: 0 }}>{task.assignee}</Tag>
+                        <Tag style={{ marginInlineEnd: 0 }} title={task.assignee}><AccountName accountId={task.assignee} /></Tag>
                       </Flex>
                       <Tag style={{ marginInlineEnd: 0 }}>{task.role}</Tag>
                       {task.depends_on?.length > 0 && (

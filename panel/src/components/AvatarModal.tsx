@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { App as AntApp, Button, Flex, Modal, Popconfirm, Typography, Upload } from "antd";
 import { DeleteOutlined, UploadOutlined } from "@ant-design/icons";
-import { api } from "../api";
+import { accountDisplayName, api } from "../api";
 import type { Account } from "../api";
 import { AccountAvatar, refreshAccounts } from "./AccountAvatar";
 
@@ -121,7 +121,7 @@ export function AvatarModal({ open, account, onClose, onSuccess }: AvatarModalPr
   return (
     <Modal
       open={open}
-      title={account ? `Change picture for ${account.label}` : "Change profile picture"}
+      title={account ? `Change picture for ${accountDisplayName(account)}` : "Change profile picture"}
       onCancel={onClose}
       destroyOnHidden
       footer={

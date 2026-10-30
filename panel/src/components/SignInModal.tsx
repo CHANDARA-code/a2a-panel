@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Alert, App as AntApp, Button, Collapse, Flex, Input, Modal, Result, Segmented, Tag, Typography } from "antd";
 import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, LinkOutlined, StopOutlined, SyncOutlined } from "@ant-design/icons";
-import { api } from "../api";
+import { accountDisplayName, api } from "../api";
 import type { Account, LoginMethod, LoginSession, LoginState, Provider } from "../api";
 import { useServerEvent } from "../events";
 import { AccountAvatar } from "./AccountAvatar";
@@ -10,7 +10,7 @@ interface SignInModalProps {
   account: Account | null;
   provider: Provider | null;
   open: boolean;
-  onClose: () => void;
+  onClose: (session: LoginSession | null) => void;
   onSuccess: () => void;
   autoStart?: boolean;
   onStarted?: (method: LoginMethod) => void;
@@ -117,12 +117,13 @@ export function SignInModal({ account, provider, open, onClose, onSuccess, autoS
   }, []);
 
   const handleClose = async () => {
+    let latest = session;
     if (session && (session.state === "starting" || session.state === "waiting")) {
       try {
-        await api.cancelLoginSession(session.id);
+        latest = await api.cancelLoginSession(session.id);
       } catch {}
     }
-    onClose();
+    onClose(latest);
   };
 
   const startLogin = async () => {
@@ -167,7 +168,7 @@ export function SignInModal({ account, provider, open, onClose, onSuccess, autoS
         account ? (
           <Flex align="center" gap={8}>
             <AccountAvatar account={account} size={24} />
-            <span>{`Sign in to ${account.label} (${account.id})`}</span>
+            <span>{`Sign in to ${accountDisplayName(account)} (${account.id})`}</span>
           </Flex>
         ) : (
           "Sign in"

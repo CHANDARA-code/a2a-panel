@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Avatar, theme } from "antd";
-import { api } from "../api";
-import type { Account, ProviderId } from "../api";
+import { accountDisplayName, api } from "../api";
+import type { Account, Provider, ProviderId } from "../api";
 import { ProviderIcon } from "./ProviderIcon";
 
 export interface AccountAvatarProps {
@@ -21,16 +21,28 @@ export function getCachedAccounts(): Account[] | null {
   return cachedAccounts;
 }
 
-export function refreshAccounts(): Promise<Account[]> {
-  accountsPromise = api.accounts().then((res) => {
+export function loadAccounts(): Promise<{ accounts: Account[]; providers: Provider[] }> {
+  const request = api.accounts().then((res) => {
     cachedAccounts = res.accounts;
     accountListeners.forEach((listener) => listener(res.accounts));
-    return res.accounts;
-  }).catch((err) => {
+    return res;
+  });
+  accountsPromise = request.then((res) => res.accounts).catch((err) => {
     accountsPromise = null;
     throw err;
   });
-  return accountsPromise;
+  accountsPromise.catch(() => {});
+  return request;
+}
+
+export function refreshAccounts(): Promise<Account[]> {
+  loadAccounts().catch(() => {});
+  return accountsPromise as Promise<Account[]>;
+}
+
+export function AccountName({ accountId }: { accountId: string }) {
+  const account = useAccounts().find((a) => a.id === accountId);
+  return <>{account ? accountDisplayName(account) : accountId}</>;
 }
 
 export function useAccounts(): Account[] {
@@ -172,8 +184,8 @@ export function AccountAvatar({
     <Avatar
       size={size}
       src={hasImage ? avatarUrl! : undefined}
-      alt={hasImage ? resolvedAccount.label : undefined}
-      aria-label={resolvedAccount.label}
+      alt={hasImage ? accountDisplayName(resolvedAccount) : undefined}
+      aria-label={accountDisplayName(resolvedAccount)}
       onError={() => {
         setImgError(true);
         return false;

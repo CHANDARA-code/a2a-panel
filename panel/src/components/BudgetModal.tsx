@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { App as AntApp, Button, Form, InputNumber, Modal, Popconfirm, Select, Switch } from "antd";
-import { api } from "../api";
+import { accountDisplayName, api } from "../api";
 import type { AccountBudget, AccountUsageEntry } from "../api";
 
 interface BudgetModalProps {
@@ -56,7 +56,7 @@ export function BudgetModal({ open, account, onClose, onSuccess }: BudgetModalPr
         stop: Boolean(values.stop),
       };
       await api.setBudget(account.id, budget);
-      message.success(`Budget updated for ${account.label}`);
+      message.success(`Budget updated for ${accountDisplayName(account)}`);
       onSuccess();
       onClose();
     } catch (err) {
@@ -71,7 +71,7 @@ export function BudgetModal({ open, account, onClose, onSuccess }: BudgetModalPr
     setRemoving(true);
     try {
       await api.deleteBudget(account.id);
-      message.success(`Budget removed for ${account.label}`);
+      message.success(`Budget removed for ${accountDisplayName(account)}`);
       onSuccess();
       onClose();
     } catch (err) {
@@ -84,7 +84,7 @@ export function BudgetModal({ open, account, onClose, onSuccess }: BudgetModalPr
   return (
     <Modal
       open={open}
-      title={account ? `${account.budget ? "Edit" : "Set"} budget · ${account.label}` : "Budget"}
+      title={account ? `${account.budget ? "Edit" : "Set"} budget · ${accountDisplayName(account)}` : "Budget"}
       onCancel={onClose}
       destroyOnHidden
       footer={[

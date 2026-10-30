@@ -142,6 +142,7 @@ export interface AccountUsageEntry {
   provider: ProviderId;
   label: string;
   system: boolean;
+  identity?: AccountIdentity | null;
   avatarUrl?: string | null;
   totals: {
     tasks: number;
@@ -221,7 +222,13 @@ export interface AccountIdentity {
 
 const AUTO_LABEL = /^(Antigravity|Claude|Claude Code|Codex) account \d+$/;
 
-export function accountDisplayName(account: Account): string {
+type NamedAccount = Pick<Account, "id" | "label"> & {
+  system?: boolean;
+  identity?: AccountIdentity | null;
+  status?: { email?: string | null } | null;
+};
+
+export function accountDisplayName(account: NamedAccount): string {
   const custom = !account.system && account.label && account.label !== account.id && !AUTO_LABEL.test(account.label);
   if (custom) return account.label;
   return account.identity?.name || account.identity?.email || account.status?.email || account.label || account.id;
@@ -253,6 +260,7 @@ export interface LoginSession {
   url: string | null;
   code: string | null;
   needsCode: boolean;
+  verifying?: boolean;
   command: string;
   terminalOpened: boolean;
   output: string;

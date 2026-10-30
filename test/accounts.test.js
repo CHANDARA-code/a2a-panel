@@ -1265,3 +1265,26 @@ test('stopping the server also stops its sign-in processes', async () => {
   instance.proc.kill('SIGTERM');
   await waitFor(() => !runningCommands().includes(`sleep ${seconds}`));
 });
+
+test('closing the sign-in while the new sign-in is being checked keeps it instead of cancelling it', async () => {
+  const instance = await startInstance({ FAKE_CLAUDE_STATUS_DELAY: '2' });
+  await fetch(`${instance.base}/api/accounts`, { method: 'POST', headers: authed(), body: JSON.stringify({ id: 'c-verify', provider: 'claude' }) });
+  const { login } = await (await fetch(`${instance.base}/api/accounts/c-verify/login`, { method: 'POST', headers: authed(), body: JSON.stringify({ method: 'browser' }) })).json();
+  await waitFor(async () => (await loginOf(instance, login.id)).needsCode);
+  await fetch(`${instance.base}/api/accounts/logins/${login.id}/code`, { method: 'POST', headers: authed(), body: JSON.stringify({ code: 'good-code' }) });
+  await waitFor(async () => (await loginOf(instance, login.id)).verifying);
+
+  const afterCancel = (await (await fetch(`${instance.base}/api/accounts/logins/${login.id}/cancel`, { method: 'POST', headers: authed() })).json()).login;
+  assert.strictEqual(afterCancel.state, 'waiting');
+  assert.strictEqual(afterCancel.verifying, true);
+  const done = await waitFor(async () => {
+    const current = await loginOf(instance, login.id);
+    return ['succeeded', 'failed', 'cancelled'].includes(current.state) ? current : null;
+  });
+  assert.strictEqual(done.state, 'succeeded');
+  assert.strictEqual(done.verifying, false);
+  assert.strictEqual((await accountOf(instance, 'c-verify')).status.state, 'signed-in');
+
+  const finished = (await (await fetch(`${instance.base}/api/accounts/logins/${login.id}/cancel`, { method: 'POST', headers: authed() })).json()).login;
+  assert.strictEqual(finished.state, 'succeeded', 'cancelling a finished sign-in rewrote its result');
+});

@@ -47,6 +47,8 @@ All notable changes to a2a-panel are listed here. The format follows [Keep a Cha
 - Claude Code accounts show the Claude display name from their own `.claude.json`.
 - Token totals mean the same for every CLI (new input plus output, cache reads separate); Claude Code and Codex totals no longer include cache reads.
 - An account that reuses a deleted account's id no longer inherits its usage or budget spend.
+- Closing the sign-in window while a finished sign-in is being checked no longer deletes the new account; cancelling a finished sign-in no longer rewrites its result.
+- Leader and member pickers, team cards, run details, usage cards and dialogs show each account's profile name (a custom label still wins), and the Accounts page and avatars share one account request.
 - Sign-in codes are hidden from sign-in output for every provider; a sign-in that ignores SIGTERM is killed; a missing CLI no longer stops the server.
 - Codex keeps showing signed out after a task proves its stored sign-in was rejected, until you sign in again.
 - Leader-written verification commands run on the host only after explicit plan approval in plan-first mode, preventing untrusted command execution.

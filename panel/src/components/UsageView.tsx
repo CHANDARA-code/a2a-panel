@@ -27,7 +27,7 @@ import {
   ReloadOutlined,
   SettingOutlined,
 } from "@ant-design/icons";
-import { api } from "../api";
+import { accountDisplayName, api } from "../api";
 import type { AccountUsageEntry, AccountUsageReport, ProviderId } from "../api";
 import { formatAgo, formatDurationUntil } from "../format";
 import { useServerEvent } from "../events";
@@ -271,7 +271,7 @@ export function UsageView({ isMobile }: UsageViewProps) {
                           <AccountAvatar accountId={account.id} size={32} />
                           <div style={{ minWidth: 0, flex: "1 1 auto" }}>
                             <Typography.Text strong style={{ fontSize: 15, display: "block" }} ellipsis>
-                              {account.label}
+                              {accountDisplayName(account)}
                             </Typography.Text>
                             <Typography.Text code copyable style={{ fontSize: 12 }}>
                               {account.id}
@@ -603,7 +603,7 @@ export function UsageView({ isMobile }: UsageViewProps) {
           {zeroAccounts.length > 0 && (
             <Card size="small" styles={{ body: { padding: 12 } }}>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                No usage in this range: {zeroAccounts.map((a) => `${a.label} (${a.id})`).join(", ")}
+                No usage in this range: {zeroAccounts.map((a) => `${accountDisplayName(a)} (${a.id})`).join(", ")}
               </Typography.Text>
             </Card>
           )}

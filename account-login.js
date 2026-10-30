@@ -219,6 +219,7 @@ function startLogin(accountId, method) {
     url: null,
     code: null,
     needsCode: false,
+    verifying: false,
     command: commandStr,
     terminalOpened: false,
     output: '',
@@ -371,6 +372,8 @@ function startLogin(accountId, method) {
     if (session.state !== 'starting' && session.state !== 'waiting') return;
 
     if (code === 0 || needsTerminal) {
+      session.verifying = true;
+      notifyLoginChange(session);
       try {
         const checked = await checkAccount(accountId);
         if (checked.status.state === 'signed-in') {
@@ -389,6 +392,7 @@ function startLogin(accountId, method) {
       const lines = session.output.trim().split('\n').filter(Boolean);
       session.error = lines.length ? lines[lines.length - 1] : 'Login process exited with error';
     }
+    session.verifying = false;
     session.finishedAt = new Date().toISOString();
     notifyLoginChange(session);
   });
@@ -421,6 +425,7 @@ function cancelLogin(loginId) {
   if (!session) {
     throw new AccountError('Login session not found', 404);
   }
+  if (session.verifying || (session.state !== 'starting' && session.state !== 'waiting')) return session;
   stopSessionTimers(loginId);
   const child = childProcesses.get(loginId);
   if (child) {
