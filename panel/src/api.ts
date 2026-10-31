@@ -399,8 +399,35 @@ async function request<T>(path: string, init: RequestInit = {}, parse: "json" | 
   return (parse === "text" ? response.text() : response.json()) as Promise<T>;
 }
 
+export type UpdateStateName = "idle" | "installing" | "restarting" | "installed" | "failed";
+
+export interface VersionInfo {
+  name: string;
+  current: string;
+  latest: string | null;
+  updateAvailable: boolean;
+  checksEnabled: boolean;
+  checkedAt: string | null;
+  error: string | null;
+  install: "npm-global" | "source" | "other" | null;
+  canUpdate: boolean;
+  command: string | null;
+  notesUrl: string | null;
+  restart: "service" | "pid-file" | "manual";
+  update: {
+    state: UpdateStateName;
+    version: string | null;
+    output: string;
+    error: string | null;
+    startedAt: string | null;
+    finishedAt: string | null;
+  };
+}
+
 export const api = {
   health: () => request<Health>("/api/health"),
+  version: (refresh = false) => request<VersionInfo>(`/api/version${refresh ? "?refresh=1" : ""}`),
+  startUpdate: () => request<VersionInfo>("/api/update", { method: "POST" }),
   roles: () => request<RolesResponse>("/api/roles"),
   workspaces: () => request<{ workspaces: string[] }>("/api/workspaces").then((r) => r.workspaces),
   tasks: () => request<{ tasks: Task[] }>("/api/tasks").then((r) => r.tasks),

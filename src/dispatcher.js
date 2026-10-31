@@ -813,6 +813,7 @@ module.exports = {
   cancelTask,
   isTaskProcessLive,
   readUsageTotals,
+  countRunningTasks,
   USAGE_LOG,
   activeTasks,
   LOGS_DIR,

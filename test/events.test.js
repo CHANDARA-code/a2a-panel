@@ -73,6 +73,7 @@ async function startInstance(extraEnv = {}) {
       FAKE_AGY_MODE: 'stream',
       FAKE_AGY_STREAM_DELAY: '2',
       FAKE_CLAUDE_MODE: 'stream',
+      A2A_UPDATE_CHECK: '0',
       ...extraEnv
     },
     stdio: 'ignore'
@@ -222,6 +223,12 @@ test('case a: GET /api/events returns 200, text/event-stream, and hello, tasks, 
     assert.ok(evUsage);
     assert.strictEqual(evUsage.event, 'usage');
     assert.deepStrictEqual(evUsage.data, {});
+
+    const evVersion = await sse.nextEvent();
+    assert.ok(evVersion);
+    assert.strictEqual(evVersion.event, 'version');
+    assert.strictEqual(evVersion.data.current, require('../package.json').version);
+    assert.strictEqual(evHello.data.version, require('../package.json').version);
   } finally {
     controller.abort();
   }
@@ -237,6 +244,7 @@ test('case b: Idle: no further tasks/teams/usage event arrives within 5 s', asyn
     await sse.nextEvent();
     await sse.nextEvent();
     await sse.nextEvent();
+    assert.strictEqual((await sse.nextEvent()).event, 'version');
 
     const extraEvent = await sse.nextEvent(5000);
     assert.strictEqual(extraEvent, null);

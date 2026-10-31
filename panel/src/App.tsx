@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   App as AntApp,
@@ -16,15 +16,16 @@ import {
   Typography,
   theme,
 } from "antd";
-import { MoonOutlined, PlusOutlined, ReloadOutlined, SunOutlined, ThunderboltOutlined } from "@ant-design/icons";
+import { CloudDownloadOutlined, MoonOutlined, PlusOutlined, ReloadOutlined, SunOutlined, ThunderboltOutlined } from "@ant-design/icons";
 import { api } from "./api";
-import type { DispatchInput, Task } from "./api";
+import type { DispatchInput, Task, VersionInfo } from "./api";
 import { formatUptime } from "./format";
 import { useServerConnection, useServerEvent } from "./events";
 import { darkAntdTheme, lightAntdTheme, useTheme } from "./theme";
 import { NewTaskModal } from "./components/NewTaskModal";
 import { TaskDrawer } from "./components/TaskDrawer";
 import { TaskList } from "./components/TaskList";
+import { UpdateModal } from "./components/UpdateModal";
 
 type Filter = "all" | "running" | "completed" | "failed" | "cancelled" | "stale";
 type View = "tasks" | "teams" | "accounts" | "usage" | "presets";
@@ -67,11 +68,27 @@ function Panel() {
   const [uptimeNow, setUptimeNow] = useState(() => Date.now());
   const [durationNow, setDurationNow] = useState(() => Date.now());
 
-  useServerEvent("hello", (data: { uptimeSeconds: number; pid: number }) => {
+  const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
+  const [updateOpen, setUpdateOpen] = useState(false);
+  const loadedVersionRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    api.version().then(setVersionInfo).catch(() => {});
+  }, []);
+
+  useServerEvent("version", (data: VersionInfo) => setVersionInfo(data));
+
+  useServerEvent("hello", (data: { uptimeSeconds: number; pid: number; version?: string }) => {
     if (typeof data?.uptimeSeconds === "number") {
       setServerStartedAtMs(Date.now() - data.uptimeSeconds * 1000);
     }
+    if (!data?.version) return;
+    if (loadedVersionRef.current === null) loadedVersionRef.current = data.version;
+    else if (loadedVersionRef.current !== data.version) window.location.reload();
   });
+
+  const updating = versionInfo?.update.state === "installing" || versionInfo?.update.state === "restarting";
+  const showUpdate = Boolean(versionInfo && (versionInfo.updateAvailable || updating || versionInfo.update.state === "installed"));
 
   useServerEvent("tasks", (data: { tasks: Task[] }) => {
     if (Array.isArray(data?.tasks)) {
@@ -246,6 +263,18 @@ function Panel() {
         </Flex>
         <Flex align="center" gap={8}>
           {isMobile && <Tag color={offline ? "error" : "success"} style={{ marginInlineEnd: 0 }}>{offline ? "Offline" : "Online"}</Tag>}
+          {showUpdate && versionInfo && (
+            <Button
+              type="primary"
+              ghost
+              icon={<CloudDownloadOutlined />}
+              loading={updating}
+              onClick={() => setUpdateOpen(true)}
+              aria-label={`Update to ${versionInfo.update.version ?? versionInfo.latest}`}
+            >
+              {isMobile ? null : updating ? "Updating…" : `Update to ${versionInfo.update.version ?? versionInfo.latest}`}
+            </Button>
+          )}
           <Button
             aria-label={mode === "dark" ? "Switch to light theme" : "Switch to dark theme"}
             icon={mode === "dark" ? <SunOutlined /> : <MoonOutlined />}
@@ -350,6 +379,10 @@ function Panel() {
         onCancel={cancelTask}
         onRerun={rerun}
       />
+
+      {versionInfo && (
+        <UpdateModal open={updateOpen} info={versionInfo} onClose={() => setUpdateOpen(false)} onChange={setVersionInfo} />
+      )}
 
       <NewTaskModal
         open={composerOpen}

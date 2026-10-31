@@ -160,6 +160,7 @@ When running `a2a-panel server start`:
 - **Health Check**: `GET http://127.0.0.1:5188/health`
 - **List Roles**: `GET http://127.0.0.1:5188/roles`
 - **Dispatch Task**: `POST http://127.0.0.1:5188/tasks/send`. Optional `preset` (a preset id, or `null` / `"none"` for none; omitted means the default preset) and optional `account` (account id). JSON-RPC `message/send` takes the same fields.
+- **Version and update** (panel API): `GET /api/version` (`?refresh=1` asks npm again, at most once a minute) returns the running and newest versions and how this copy was installed; `POST /api/update` (token required) installs the newest version with `npm install -g` and restarts the server.
 - **Accounts** (panel API, token required for changes): `GET /api/accounts`, `POST /api/accounts` (`{id, provider, label?, model?}`), `PUT /api/accounts/:id`, `DELETE /api/accounts/:id`, `POST /api/accounts/:id/check`, `POST /api/accounts/:id/login`, `POST /api/accounts/:id/logout`, `GET /api/accounts/logins/:loginId`, `POST /api/accounts/logins/:loginId/code`, `POST /api/accounts/logins/:loginId/cancel`.
 - **Presets** (panel API, token required for changes): `GET /api/presets`, `POST /api/presets` (`{id, template?, from?, title?}`), `GET|PUT|DELETE /api/presets/:id`, `POST|DELETE /api/presets/:id/default`, and `POST /api/prompt-preview` (`{role, workspace, prompt, preset}`) to see the exact prompt.
 - **Task Status**: `GET http://127.0.0.1:5188/tasks/:id`. Returns status, output, `usage`, `verification`, `conversationId`, `changes`, `workspace`, `account` and `provider`. JSON-RPC `tasks/get` returns the same fields.
@@ -180,6 +181,7 @@ When running `a2a-panel server start`:
 Open `http://127.0.0.1:5188/dashboard` (or run `a2a-panel dashboard`).
 
 - Pages: Tasks, Teams, Accounts, Usage and Presets. Updates are pushed to the page over one event stream, so an idle panel sends no repeating requests.
+- Update button: when npm has a newer version, the header shows "Update to x.y.z". For a global npm install, Update now installs it and restarts the server (refused while tasks or team runs are running), and the page reloads on the new version; for a git clone it shows the commands to run. The check asks the npm registry at most every 6 hours; `A2A_UPDATE_CHECK=0` turns it off.
 - Monitor: stat cards, status filter, search, per-task detail with live log. Works on mobile.
 - Control: dispatch a task (specialist, workspace, prompt, preset, plan/edit mode, effort), preview the exact prompt, cancel a running task, run a task again.
 - Presets: create, edit and preview your preference files (see "5. Presets").
@@ -569,6 +571,9 @@ Set these environment variables for the server, the MCP server and the CLI. `0` 
 | `A2A_KILL_ESCALATION_MS` | `5000` | Time between SIGTERM and SIGKILL when stopping a task. |
 | `A2A_VERIFY_TIMEOUT_MS` | `600000` (10 min) | Limit for the bridge's own run of a `verification_command`. |
 | `A2A_LOG_RETENTION_DAYS` | `14` | Task logs older than this are deleted when a new task starts. |
+| `A2A_UPDATE_CHECK` | on | Set to `0` to stop asking the npm registry for a newer version (no Update button). |
+| `A2A_NPM_REGISTRY` | `https://registry.npmjs.org` | Registry the update check asks. |
+| `A2A_NPM_BIN` | the `npm` next to Node.js | npm used to install an update. |
 
 A stopped task shows `failed` with the reason (`Timed out after …` or `No output for …`).
 

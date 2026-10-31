@@ -9,6 +9,7 @@ const accountLogin = require('./account-login');
 const teams = require('./teams');
 const { findProviderIcon } = require('./provider-icons');
 const { PACKAGE_ROOT } = require('./config');
+const updates = require('./updates');
 
 const BASE_PATH = '/dashboard';
 const DIST_DIR = path.join(PACKAGE_ROOT, 'panel', 'dist');
@@ -887,6 +888,10 @@ accountLogin.onLoginChange((evt) => {
   broadcastEvent('login', { id: evt.id, state: evt.state });
 });
 
+updates.onUpdateChange((info) => {
+  broadcastEvent('version', info);
+});
+
 function handleEvents(req, res) {
   const maxClients = Number(process.env.A2A_MAX_EVENT_CLIENTS) || 32;
   if (eventClients.size >= maxClients) {
@@ -902,12 +907,14 @@ function handleEvents(req, res) {
   writeClient(res, 'retry: 3000\n\n');
   const helloData = {
     uptimeSeconds: Math.floor((Date.now() - START_TIME) / 1000),
-    pid: process.pid
+    pid: process.pid,
+    version: updates.versionInfo().current
   };
   writeClient(res, `event: hello\ndata: ${JSON.stringify(helloData)}\n\n`);
   writeClient(res, `event: tasks\ndata: ${JSON.stringify({ tasks: listTasks() })}\n\n`);
   writeClient(res, `event: teams\ndata: {}\n\n`);
   writeClient(res, `event: usage\ndata: {}\n\n`);
+  updates.checkForUpdate().then((info) => writeClient(res, `event: version\ndata: ${JSON.stringify(info)}\n\n`)).catch(() => {});
 
   const client = { req, res };
   eventClients.add(client);
@@ -940,6 +947,21 @@ async function handle(req, res, pathname, { token }) {
 
   if (method === 'GET' && pathname === '/api/events') {
     handleEvents(req, res);
+    return true;
+  }
+
+  if (method === 'GET' && pathname === '/api/version') {
+    const url = new URL(req.url, 'http://127.0.0.1');
+    sendJson(res, 200, await updates.checkForUpdate({ force: url.searchParams.get('refresh') === '1' }));
+    return true;
+  }
+
+  if (method === 'POST' && pathname === '/api/update') {
+    try {
+      sendJson(res, 202, await updates.startUpdate());
+    } catch (err) {
+      sendJson(res, err instanceof updates.UpdateError ? err.code : 500, { error: err.message });
+    }
     return true;
   }
 

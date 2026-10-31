@@ -19,10 +19,15 @@ Use `--mode plan` for work that must not change anything.
 
 ## Account names and photos
 
-- To show real names and photos, a2a-panel reads the sign-in each tool stored for that account: the id_token claims in Codex's `auth.json` (read locally), and agy's stored token (account file or keychain item `antigravity`), whose access token is sent only to `https://www.googleapis.com/oauth2/v3/userinfo`.
+- To show real names and photos, a2a-panel reads the sign-in each tool stored for that account: the id_token claims in Codex's `auth.json` (read locally), the `oauthAccount` display name in Claude Code's `.claude.json` (no tokens), and agy's stored token (keychain item `gemini` or the account's token file, whichever is newer), whose access token is sent only to `https://www.googleapis.com/oauth2/v3/userinfo`.
 - Tokens are never logged, copied, or returned by any API. Only name, email, plan and the photo are saved.
 - Photos are downloaded only over HTTPS from `*.googleusercontent.com`, without credentials or redirects, limited to 512 KB and type-checked by their bytes like uploads.
-- The access token is never refreshed by a2a-panel; when it has expired, only the email is shown.
+- The access token is never refreshed by a2a-panel; when it has expired, the name saved earlier is kept.
+
+## Update check
+
+- To show the Update button, the server asks `https://registry.npmjs.org/a2a-panel/latest` (or `A2A_NPM_REGISTRY`) for the newest version, at most every 6 hours. The request carries no account, token or task data. Set `A2A_UPDATE_CHECK=0` to turn it off.
+- Update now (`POST /api/update`) needs the panel token like every other change. It only runs for a global npm install, installs the exact version the registry reported (checked against a semver pattern) with `npm install -g`, is refused while tasks or team runs are running, and then restarts the server through its login service or `a2a-panel server start`.
 
 ## Profile pictures and media security
 
