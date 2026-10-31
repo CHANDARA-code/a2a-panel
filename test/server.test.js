@@ -370,7 +370,7 @@ const waitForLog = `
 test('in-memory task output is capped while the log keeps everything', async () => {
   const script = `
     ${waitForLog}
-    const { runAgyTask } = require(${JSON.stringify(path.join(ROOT, 'dispatcher.js'))});
+    const { runAgyTask } = require(${JSON.stringify(path.join(ROOT, 'src', 'dispatcher.js'))});
     runAgyTask({ role: 'web-engineer', prompt: 'x', workspace: process.argv[1], onDone: (t) => waitForLog(t.logFile, (log) => {
       console.log(JSON.stringify({ kept: t.output.length, total: t.outputChars, truncated: t.outputTruncated, logLength: log.length }));
     }) });
@@ -392,7 +392,7 @@ test('in-memory task output is capped while the log keeps everything', async () 
 function runInProcess(mode, extraEnv = {}, taskArgs = {}) {
   const script = `
     ${waitForLog}
-    const { runAgyTask } = require(${JSON.stringify(path.join(ROOT, 'dispatcher.js'))});
+    const { runAgyTask } = require(${JSON.stringify(path.join(ROOT, 'src', 'dispatcher.js'))});
     runAgyTask({ role: 'web-engineer', prompt: 'x', workspace: process.argv[1], ...JSON.parse(process.argv[2] || '{}'), onDone: (t) => waitForLog(t.logFile, (log) => {
       console.log(JSON.stringify({ status: t.status, error: t.error, verification: t.verification, output: t.output, usage: t.usage, conversationId: t.conversationId, changes: t.changes, log }));
     }) });
@@ -443,7 +443,7 @@ test('a git workspace reports what changed after the run', () => {
   execFileSync('git', ['-C', workspace, 'init', '-q']);
   fs.writeFileSync(path.join(workspace, 'new-file.txt'), 'hi');
   const script = `
-    const { runAgyTask } = require(${JSON.stringify(path.join(ROOT, 'dispatcher.js'))});
+    const { runAgyTask } = require(${JSON.stringify(path.join(ROOT, 'src', 'dispatcher.js'))});
     runAgyTask({ role: 'web-engineer', prompt: 'x', workspace: process.argv[1], onDone: (t) => console.log(JSON.stringify({ changes: t.changes })) });
   `;
   const out = execFileSync(process.execPath, ['-e', script, workspace], {
@@ -455,7 +455,7 @@ test('a git workspace reports what changed after the run', () => {
 
 test('conversation_id and model reject values that could act as flags', () => {
   const script = `
-    const { runAgyTask } = require(${JSON.stringify(path.join(ROOT, 'dispatcher.js'))});
+    const { runAgyTask } = require(${JSON.stringify(path.join(ROOT, 'src', 'dispatcher.js'))});
     for (const extra of [{ conversation_id: '--evil-flag-x' }, { model: '--evil' }]) {
       try { runAgyTask({ role: 'web-engineer', prompt: 'x', workspace: process.argv[1], ...extra }); console.log('accepted'); } catch (e) { console.log(e.message); }
     }
@@ -525,7 +525,7 @@ test('logs older than the retention window are pruned, recent ones kept', () => 
   const workspace = path.join(sandbox, 'ws');
   fs.mkdirSync(workspace);
   const script = `
-    const { runAgyTask } = require(${JSON.stringify(path.join(ROOT, 'dispatcher.js'))});
+    const { runAgyTask } = require(${JSON.stringify(path.join(ROOT, 'src', 'dispatcher.js'))});
     runAgyTask({ role: 'web-engineer', prompt: 'x', workspace: process.argv[1], onDone: () => console.log('done') });
   `;
   execFileSync(process.execPath, ['-e', script, workspace], {
@@ -604,7 +604,8 @@ test('the consistency check passes on this repo and fails when the role lists dr
     }
   }
   fs.cpSync(path.join(ROOT, 'personas'), path.join(copy, 'personas'), { recursive: true });
-  const mcp = path.join(copy, 'mcp-server.js');
+  fs.cpSync(path.join(ROOT, 'src'), path.join(copy, 'src'), { recursive: true });
+  const mcp = path.join(copy, 'src', 'mcp-server.js');
   fs.writeFileSync(mcp, fs.readFileSync(mcp, 'utf-8').replace("            'devops-engineer',\n", ''));
   const drifted = spawnSync(process.execPath, [script, copy], { encoding: 'utf-8' });
   assert.strictEqual(drifted.status, 1);

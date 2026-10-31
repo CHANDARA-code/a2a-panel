@@ -218,7 +218,7 @@ test('agy account home layout (symlinks, Library without Keychains, .gemini/conf
   });
   assert.strictEqual(resCreate.status, 201);
 
-  const accountsModule = require('../accounts');
+  const accountsModule = require('../src/accounts');
   const account = accountsModule.getAccount('work-agy');
   const targetHome = accountsModule.ensureAgyHome(account);
 
@@ -776,7 +776,7 @@ const signinServer = () => (signinInstance = signinInstance || startInstance({ F
 test('a built-in account keeps every status update, not only the first', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2a-acc-sys-'));
   const out = runAccountsScript(dir, `
-    const a = require('./accounts');
+    const a = require('./src/accounts');
     const s = (state) => ({ state, detail: state, email: null, plan: null, checkedAt: null, warning: null });
     const account = a.getAccount('codex');
     account.status = s('signed-in'); a.saveAccount(account);
@@ -793,7 +793,7 @@ test('an unreadable accounts file is reported and never replaced by an empty lis
   const broken = '{"accounts": [{"id": "keep-me"';
   fs.writeFileSync(file, broken);
   const out = runAccountsScript(dir, `
-    const a = require('./accounts');
+    const a = require('./src/accounts');
     const results = [];
     for (const step of [() => a.listAccounts(), () => a.createAccount({ id: 'new-one', provider: 'claude' })]) {
       try { step(); results.push('ok'); } catch (e) { results.push(e.code); }

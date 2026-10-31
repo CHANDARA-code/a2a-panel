@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
-const { DATA_DIR } = require('./config');
+const { DATA_DIR, PACKAGE_ROOT } = require('./config');
 const { LOGS_DIR, getAgentCard, runTask, cancelTask } = require('./dispatcher');
 const presets = require('./presets');
 const accounts = require('./accounts');
@@ -663,7 +663,7 @@ function startRun({ teamId, goal, workspace, mode = 'plan' }) {
   if (!stat.isDirectory()) {
     throw new TeamError('Workspace is not a directory', 400);
   }
-  if (path.resolve(targetWorkspace) === path.resolve(__dirname)) {
+  if (path.resolve(targetWorkspace) === path.resolve(PACKAGE_ROOT)) {
     throw new TeamError('Workspace cannot be the bridge folder', 400);
   }
 

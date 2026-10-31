@@ -2,13 +2,13 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
-const { DATA_DIR } = require('./config');
+const { DATA_DIR, PACKAGE_ROOT } = require('./config');
 
 // Start the HTTP server (and so the dashboard) when the user logs in:
 // a LaunchAgent on macOS, a systemd user service on Linux.
 const LABEL = 'com.a2a-panel.server';
 const UNIT = 'a2a-panel.service';
-const SERVER_PATH = path.join(__dirname, 'server.js');
+const SERVER_PATH = path.join(PACKAGE_ROOT, 'server.js');
 // Variables the server reads; they are copied into the service when it is enabled.
 const PASSED_ENV = /^(A2A_[A-Z_]+|AGY_BIN)$/;
 

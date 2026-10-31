@@ -2,13 +2,13 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { AGY_BIN, LOGS_DIR } = require('./dispatcher');
-const { DATA_DIR } = require('./config');
+const { DATA_DIR, PACKAGE_ROOT } = require('./config');
 const { resolveBin } = require('./providers');
 const { listAccounts } = require('./accounts');
 
 const MCP_NAME = 'a2a-panel';
 const LEGACY_MCP_NAMES = ['agy-bridge', 'a2a-antigravity'];
-const CLI_PATH = path.join(__dirname, 'cli.js');
+const CLI_PATH = path.join(PACKAGE_ROOT, 'cli.js');
 
 function tryRun(file, args, timeout = 20000) {
   try {
@@ -64,7 +64,7 @@ function runDoctor() {
     add('fail', 'Data directory', `${LOGS_DIR} is not writable (${err.message}). Set A2A_HOME to a writable folder.`);
   }
 
-  const panelBuilt = fs.existsSync(path.join(__dirname, 'panel', 'dist', 'index.html'));
+  const panelBuilt = fs.existsSync(path.join(PACKAGE_ROOT, 'panel', 'dist', 'index.html'));
   add(panelBuilt ? 'ok' : 'warn', 'Web panel', panelBuilt ? 'built' : 'not built. Run "npm run build:panel" to enable the dashboard.');
 
   const claudeBin = resolveBin('claude');

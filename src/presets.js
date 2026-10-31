@@ -1,12 +1,12 @@
 const fs = require('fs');
 const path = require('path');
-const { DATA_DIR } = require('./config');
+const { DATA_DIR, PACKAGE_ROOT } = require('./config');
 
 // A preset is a folder of markdown files that describe how the user wants code written
 // (coding style, frontend stack, API stack, testing, default technology choices...).
 // Each file may carry frontmatter "roles: [...]" so it only reaches the specialists it concerns.
 const PRESETS_DIR = process.env.A2A_PRESETS_DIR || path.join(DATA_DIR, 'presets');
-const TEMPLATES_DIR = path.join(__dirname, 'preset-templates');
+const TEMPLATES_DIR = path.join(PACKAGE_ROOT, 'preset-templates');
 const WORKSPACE_PREFS_DIR = path.join('.agy', 'preferences');
 const SETTINGS_FILE = 'settings.json';
 const META_FILE = 'preset.json';

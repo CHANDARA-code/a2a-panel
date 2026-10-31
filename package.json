@@ -16,7 +16,7 @@
     "a2a-panel": "cli.js",
     "a2a": "cli.js"
   },
-  "main": "dispatcher.js",
+  "main": "src/dispatcher.js",
   "engines": {
     "node": ">=18"
   },
@@ -27,7 +27,10 @@
     "prepack": "npm run build:panel"
   },
   "files": [
-    "*.js",
+    "cli.js",
+    "server.js",
+    "mcp-server.js",
+    "src",
     "agent-card.json",
     "agent.json",
     "personas",

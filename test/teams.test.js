@@ -234,7 +234,7 @@ function taskCountFor(accountId) {
 
 function nodeScript(body) {
   return [
-    `const teams = require(${JSON.stringify(path.join(ROOT, 'teams.js'))});`,
+    `const teams = require(${JSON.stringify(path.join(ROOT, 'src', 'teams.js'))});`,
     'setTimeout(() => process.exit(3), 20000).unref();',
     body
   ].join('\n');
@@ -1144,7 +1144,7 @@ test('review runs when enabled', async () => {
 });
 
 test('a run with a dead pid reads stale without rewriting the file', async () => {
-  const teamsModule = require('../teams');
+  const teamsModule = require('../src/teams');
   const runId = 'run_1000000000_deadpid';
   const file = teamsModule.runFile(runId);
   const data = {
@@ -1432,7 +1432,7 @@ test('defect 1: verification command runs only for approved plan-first runs, not
 });
 
 test('defect 2: validate run id pattern against path traversal and malformed ids', async () => {
-  const teamsModule = require('../teams');
+  const teamsModule = require('../src/teams');
   const badIds = ['../../teams/x', 'run_1/../x', ''];
   for (const badId of badIds) {
     assert.throws(
@@ -1468,7 +1468,7 @@ test('defect 2: validate run id pattern against path traversal and malformed ids
 
 test('defect 4: stale overwrites with parallel tasks', async () => {
   clearReplays();
-  const teamsModule = require('../teams');
+  const teamsModule = require('../src/teams');
 
   await fetch(`${main.base}/api/teams`, {
     method: 'POST',
@@ -1570,7 +1570,7 @@ test('defect 4: stale overwrites with parallel tasks', async () => {
 });
 
 test('defect 5: corrupt files are skipped in list functions only', async () => {
-  const teamsModule = require('../teams');
+  const teamsModule = require('../src/teams');
   const teamsDir = teamsModule.getTeamsDir();
   const runsDir = teamsModule.getRunsDir();
 
@@ -1693,7 +1693,7 @@ test('defect 5: corrupt files are skipped in list functions only', async () => {
 });
 
 test('H2: a plan made in one process and built in another reads as built there and cannot be built again', async () => {
-  const teamsModule = require('../teams');
+  const teamsModule = require('../src/teams');
   await createClaudeAccounts(['h2-lead', 'h2-dev']);
   await createTeamOverHttp({
     id: 'h2-team',
@@ -1729,7 +1729,7 @@ test('H2: a plan made in one process and built in another reads as built there a
 });
 
 test('H2: two processes building the same plan at the same time start it only once', async () => {
-  const teamsModule = require('../teams');
+  const teamsModule = require('../src/teams');
   await createClaudeAccounts(['h2-race-lead', 'h2-race-dev']);
   await createTeamOverHttp({
     id: 'h2-race-team',
@@ -1799,8 +1799,8 @@ test('H2: two processes building the same plan at the same time start it only on
 });
 
 test('H3: a run whose team file disappears mid-run finishes from its team snapshot without crashing its process', async () => {
-  const teamsModule = require('../teams');
-  const { cancelTask } = require('../dispatcher');
+  const teamsModule = require('../src/teams');
+  const { cancelTask } = require('../src/dispatcher');
   await createClaudeAccounts(['h3-lead', 'h3-dev']);
   await createTeamOverHttp({
     id: 'h3-vanish-team',
@@ -1841,7 +1841,7 @@ test('H3: a run whose team file disappears mid-run finishes from its team snapsh
 });
 
 test('H3: deleting a team is refused with 409 while it has a live run, and stale or finished runs do not block it', async () => {
-  const teamsModule = require('../teams');
+  const teamsModule = require('../src/teams');
   await createClaudeAccounts(['h3b-lead', 'h3b-dev']);
   await createTeamOverHttp({
     id: 'h3-busy-team',
@@ -1922,7 +1922,7 @@ test('H3: deleting a team is refused with 409 while it has a live run, and stale
 });
 
 test('H3: an error thrown while a task finishes fails the run with that error instead of crashing its process', async () => {
-  const teamsModule = require('../teams');
+  const teamsModule = require('../src/teams');
   await createClaudeAccounts(['h3c-lead', 'h3c-dev']);
   await createTeamOverHttp({
     id: 'h3-crash-team',
@@ -1965,8 +1965,8 @@ test('H3: an error thrown while a task finishes fails the run with that error in
 });
 
 test('M3: a developer task that cannot start leaves the run reviewing until its review ends', async () => {
-  const teamsModule = require('../teams');
-  const { cancelTask } = require('../dispatcher');
+  const teamsModule = require('../src/teams');
+  const { cancelTask } = require('../src/dispatcher');
   await createClaudeAccounts(['m3-lead', 'm3-dev', 'm3-broke']);
   const budgetRes = await fetch(`${main.base}/api/accounts/m3-broke/budget`, {
     method: 'PUT',
@@ -2077,7 +2077,7 @@ async function blockAccountByBudget(accountId) {
 }
 
 test('the parallel limit holds when a task cannot start', async () => {
-  const teamsModule = require('../teams');
+  const teamsModule = require('../src/teams');
   await createClaudeAccounts(['mp-lead', 'mp-dev', 'mp-broke']);
   await blockAccountByBudget('mp-broke');
   await createTeamOverHttp({ id: 'mp-team', name: 'Parallel limit team', maxParallel: 2, leader: { account: 'mp-lead' }, members: [{ account: 'mp-dev', roles: [] }, { account: 'mp-broke', roles: [] }] });
@@ -2099,7 +2099,7 @@ test('the parallel limit holds when a task cannot start', async () => {
 });
 
 test('a cancel from another process keeps every task of the run cancelled', async () => {
-  const teamsModule = require('../teams');
+  const teamsModule = require('../src/teams');
   await createClaudeAccounts(['xc-lead', 'xc-dev']);
   await createTeamOverHttp({ id: 'xc-team', name: 'Cross-process cancel team', leader: { account: 'xc-lead' }, members: [{ account: 'xc-dev', roles: [] }] });
   const plan = independentTasks(['xc-dev', 'xc-dev']);
@@ -2120,7 +2120,7 @@ test('a cancel from another process keeps every task of the run cancelled', asyn
 });
 
 test('a claim left behind by a killed process does not block building the plan', async () => {
-  const teamsModule = require('../teams');
+  const teamsModule = require('../src/teams');
   await createClaudeAccounts(['sc-lead', 'sc-dev']);
   await createTeamOverHttp({ id: 'sc-team', name: 'Stale claim team', leader: { account: 'sc-lead' }, members: [{ account: 'sc-dev', roles: [] }] });
   writeClaudeReplay('sc-lead', planReplay(oneTaskPlan('sc-dev')));
@@ -2139,7 +2139,7 @@ test('a claim left behind by a killed process does not block building the plan',
 });
 
 test('a leader plan whose task prompts contain code fences and braces is read correctly', () => {
-  const { parsePlan } = require('../teams');
+  const { parsePlan } = require('../src/teams');
   const plan = {
     summary: 'Two tasks: a settings view model and its tests.',
     tasks: [

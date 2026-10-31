@@ -14,7 +14,7 @@ All notable changes to a2a-panel are listed here. The format follows [Keep a Cha
 - Add account with provider logos: one click creates the account and starts sign-in; unfinished sign-ins are removed. Antigravity and Codex logos come from their editor extensions on your machine (`GET /api/providers/:id/icon`); Claude's logo is the Simple Icons glyph (CC0).
 - Teams: a leader account plans a goal into tasks for member accounts and roles, with plan-first review (instructions and check commands shown before you build), dependencies, a parallel limit, optional leader review, MCP tools `a2a_list_teams`, `a2a_run_team`, `a2a_get_team_run`, `a2a_cancel_team_run` and `a2a-panel teams` commands.
 - MCP tool `a2a_list_accounts`; CLI `a2a-panel accounts` commands.
-- Per-account Usage Monitor (`usage.js`) tracking token budgets, usage records with models breakdown, and provider plan quota snapshots.
+- Per-account Usage Monitor (`src/usage.js`) tracking token budgets, usage records with models breakdown, and provider plan quota snapshots.
 - Quota snapshot extraction for Claude Code (`rate_limit_event` and `modelUsage`), Codex (`rate_limits` from task's own rollout file), and Antigravity (capacity exhaustion failure detection).
 - Account budgets with period windows (`day`, `week`, `month`) starting at 00:00 local time, and optional hard stop enforcement refusing tasks before spawn.
 - Account profile pictures (`PUT/GET/DELETE /api/accounts/:id/avatar`) with byte signature verification (PNG, JPEG, WebP, max 512 KB), isolated storage, strict security headers, and automatic deletion on account removal.
@@ -25,6 +25,7 @@ All notable changes to a2a-panel are listed here. The format follows [Keep a Cha
 ### Changed
 
 - The panel gets updates pushed over one event stream (`GET /api/events`) instead of polling, so an idle panel makes no repeating requests.
+- Source files moved into `src/`. `cli.js`, `server.js` and `mcp-server.js` stay at the top level as entry points that load `src/`, so existing start-at-login services, Claude Code MCP registrations and `node cli.js` commands keep working unchanged.
 
 ### Fixed
 

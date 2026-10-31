@@ -8,9 +8,10 @@ const providers = require('./providers');
 const accountLogin = require('./account-login');
 const teams = require('./teams');
 const { findProviderIcon } = require('./provider-icons');
+const { PACKAGE_ROOT } = require('./config');
 
 const BASE_PATH = '/dashboard';
-const DIST_DIR = path.join(__dirname, 'panel', 'dist');
+const DIST_DIR = path.join(PACKAGE_ROOT, 'panel', 'dist');
 const TOKEN_PLACEHOLDER = '__A2A_TOKEN__';
 const LEGACY_STALE_MS = 12 * 60 * 60 * 1000;
 const HEAD_BYTES = 16000;

@@ -5,7 +5,7 @@ const { resolvePreferences } = require('./presets');
 const { resolveBin, buildCommand, createParser, authFailurePattern, signInPromptPattern } = require('./providers');
 const { resolveAccount, accountEnv, markSignedOut } = require('./accounts');
 
-const { DATA_DIR } = require('./config');
+const { DATA_DIR, PACKAGE_ROOT } = require('./config');
 
 function resolveAgyBin() {
   if (process.env.AGY_BIN) return process.env.AGY_BIN;
@@ -21,9 +21,9 @@ function resolveAgyBin() {
 }
 
 const AGY_BIN = resolveAgyBin();
-const AGENT_CARD_PATH = fs.existsSync(path.join(__dirname, 'agent-card.json'))
-  ? path.join(__dirname, 'agent-card.json')
-  : path.join(__dirname, 'agent.json');
+const AGENT_CARD_PATH = fs.existsSync(path.join(PACKAGE_ROOT, 'agent-card.json'))
+  ? path.join(PACKAGE_ROOT, 'agent-card.json')
+  : path.join(PACKAGE_ROOT, 'agent.json');
 
 const LOGS_DIR = process.env.A2A_LOGS_DIR || path.join(DATA_DIR, 'logs');
 if (!fs.existsSync(LOGS_DIR)) {
@@ -252,7 +252,7 @@ function countRunningTasks() {
 const NO_WORK_SIGNALS = /no output produced|do not have access to (?:command|file|direct)|does not provide direct file|no file[- ]write or terminal|not provisioned/i;
 
 const PLUGINS_DIR = process.env.A2A_PLUGINS_DIR || path.join(process.env.HOME || '', '.gemini', 'config', 'plugins');
-const PERSONAS_DIR = path.join(__dirname, 'personas');
+const PERSONAS_DIR = path.join(PACKAGE_ROOT, 'personas');
 const PERSONA_LIMIT = 6000;
 
 function readPersona(file) {
@@ -478,7 +478,7 @@ function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = '
     throw new Error('Workspace does not exist: ' + workspace);
   }
   const targetCwd = workspace || process.cwd();
-  if (path.resolve(targetCwd) === __dirname) {
+  if (path.resolve(targetCwd) === PACKAGE_ROOT) {
     throw new Error('A workspace path is required (refusing to run agents inside the bridge directory)');
   }
 
