@@ -178,12 +178,17 @@ When running `a2a-panel server start`:
 
 Open `http://127.0.0.1:5188/dashboard` (or run `a2a-panel dashboard`).
 
+- Pages: Tasks, Teams, Accounts, Usage and Presets. Updates are pushed to the page over one event stream, so an idle panel sends no repeating requests.
 - Monitor: stat cards, status filter, search, per-task detail with live log. Works on mobile.
 - Control: dispatch a task (specialist, workspace, prompt, preset, plan/edit mode, effort), preview the exact prompt, cancel a running task, run a task again.
 - Presets: create, edit and preview your preference files (see "5. Presets").
 - Built with React, Vite and Ant Design in `panel/`. Light and dark themes.
 - Tasks started from Claude Code (MCP) or the CLI show up too, because the panel reads the task logs and PID files in `logs/`.
 - The live log shows each tool the agent runs, with its main argument, for example `[tool] run_command: npm test` or `[tool] read_file: /path/to/file.ts`. A tool call that fails shows as `[error] <tool>: <args> (<reason>)`. If `agy` reports denied actions, the task output ends with `[A2A] Antigravity denied these actions: …`.
+
+**Tasks page.** Each task shows the account that ran it, with its picture.
+
+![Tasks page](docs/screenshots/17-tasks.png)
 
 ### Keep the panel running after a restart
 
@@ -392,11 +397,13 @@ Account cards show the account's real name and email where the provider makes th
 |---|---|---|---|
 | Antigravity | Google profile | yes | Google profile photo |
 | Codex | from the sign-in token | yes (and plan) | none |
-| Claude | none | from `claude auth status` | none |
+| Claude | display name from the account's `.claude.json` | from `claude auth status` | none |
 
-For Codex the name, email and plan are read locally from the id_token in that account's `auth.json`. For Antigravity the email is read from the stored sign-in, and the name and photo come from one request to Google's user-info endpoint with that account's own access token, made after a status check; if the token has expired, only the email is shown until agy has refreshed it. Tokens are never logged, stored elsewhere or returned by the API; only name, email, plan and the photo are saved. A picture you upload always takes precedence, and removing it shows the provider photo again.
+For Codex the name, email and plan are read locally from the id_token in that account's `auth.json`. For Claude the display name is read from `oauthAccount` in the account's own `.claude.json`, only when its email matches. For Antigravity the email is read from the stored sign-in (agy's keychain entry `gemini`, or its older token file; the newest one wins), and the name and photo come from one request to Google's user-info endpoint with that account's own access token, made after a status check; if the token has expired, the name saved earlier is kept. Tokens are never logged, stored elsewhere or returned by the API; only name, email, plan and the photo are saved. A picture you upload always takes precedence, and removing it shows the provider photo again.
 
 Each account can have a custom avatar picture (PNG, JPEG, WebP, max 512 KB) uploaded via the panel UI or `PUT /api/accounts/:id/avatar`. Uploaded images are validated against their magic byte signatures, stored in `accounts/<id>/avatar.<ext>` (or `accounts/.avatars/<id>.<ext>` for built-in accounts), and served with `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'`, and `Cache-Control: no-cache` headers. Deleting an account removes its picture.
+
+Everywhere else in the panel (leader and member pickers, team cards, run details, usage cards) an account shows the same name as its card; a label you typed yourself takes precedence.
 
 ### Usage & Budgets
 
@@ -432,6 +439,22 @@ a2a-panel usage --days 30              # token usage totals, quota windows and b
 ```
 
 The built-in accounts `agy`, `claude` and `codex` are the sign-ins those tools use on this computer, also outside a2a-panel. Signing one of them in or out replaces that sign-in, so the CLI asks for `--yes` (`a2a-panel accounts login claude --yes`) and the panel asks for confirmation. To add another account next to it, use `accounts add` or **Add account** instead.
+
+### Screenshots
+
+Emails are masked in these screenshots.
+
+**Accounts.** Several accounts per CLI, each with its own name, photo, sign-in state and usage. Built-in accounts are your default sign-ins; added accounts sit next to them.
+
+![Accounts page](docs/screenshots/18-accounts.png)
+
+**Add account.** Pick the CLI and sign in with its own login; the new account never replaces an existing sign-in.
+
+![Add account dialog](docs/screenshots/19-add-account.png)
+
+**Usage.** Tokens per account (new input plus output), plan quota where the provider reports it, budgets and daily activity.
+
+![Usage page](docs/screenshots/20-usage.png)
 
 ## 7. Teams
 
@@ -505,6 +528,16 @@ When connected via MCP, Claude Code can inspect and drive teams using:
 - `a2a_run_team(team, goal, workspace_path, mode, is_async)`: Start a team run (returns a compact summary to save tokens).
 - `a2a_get_team_run(run_id)`: Check plan progress, task statuses, token counts, and review results.
 - `a2a_cancel_team_run(run_id)`: Cancel an active team run and its running developer tasks.
+
+### Screenshots
+
+**Teams.** Each team has a leader account with its own instructions and member accounts with roles. Here Claude leads the iOS team and Codex leads the Android team.
+
+![Teams page](docs/screenshots/21-teams.png)
+
+**A plan waiting for approval.** In plan-first mode the Claude leader read the workspace and split the goal into three tasks for two accounts, with dependencies. Nothing is built until you press "Build this plan".
+
+![Team run with a plan](docs/screenshots/22-team-run.png)
 
 ## 8. Security model
 
