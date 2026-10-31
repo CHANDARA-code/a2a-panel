@@ -1288,3 +1288,32 @@ test('closing the sign-in while the new sign-in is being checked keeps it instea
   const finished = (await (await fetch(`${instance.base}/api/accounts/logins/${login.id}/cancel`, { method: 'POST', headers: authed() })).json()).login;
   assert.strictEqual(finished.state, 'succeeded', 'cancelling a finished sign-in rewrote its result');
 });
+
+test('each account lists the models its own CLI offers, cached, with hidden and invalid ids left out', async () => {
+  const instance = await startInstance();
+  await fetch(`${instance.base}/api/accounts`, { method: 'POST', headers: authed(), body: JSON.stringify({ id: 'agy-models', provider: 'agy' }) });
+  await fetch(`${instance.base}/api/accounts`, { method: 'POST', headers: authed(), body: JSON.stringify({ id: 'cx-models', provider: 'codex' }) });
+  const models = async (id, query = '') => (await fetch(`${instance.base}/api/accounts/${id}/models${query}`)).json();
+
+  const signedOut = await models('agy-models');
+  assert.deepStrictEqual(signedOut.models, []);
+  assert.match(signedOut.error, /signed in/);
+
+  const cli = path.join(instance.accountsDir, 'agy-models', 'home', '.gemini', 'antigravity-cli');
+  fs.mkdirSync(cli, { recursive: true });
+  fs.writeFileSync(path.join(cli, '.signed-in'), 'ok\n');
+  const agy = await models('agy-models', '?refresh=1');
+  assert.deepStrictEqual(agy.models, [{ id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro' }, { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash' }]);
+  assert.strictEqual(agy.source, 'fake-agy.sh models');
+
+  fs.writeFileSync(instance.argsFile, '');
+  const codex = await models('cx-models');
+  assert.deepStrictEqual(codex.models.map((m) => m.id), ['gpt-test', 'gpt-test-mini']);
+  assert.match(fs.readFileSync(instance.argsFile, 'utf-8'), /CODEX_HOME: .*\/cx-models\/codex/);
+  await models('cx-models');
+  assert.strictEqual(fs.readFileSync(instance.argsFile, 'utf-8').match(/ARGV: debug models/g).length, 1, 'the model list was not cached');
+
+  const claude = await models('claude');
+  assert.deepStrictEqual(claude.models.map((m) => m.id), ['fable', 'opus', 'sonnet']);
+  assert.strictEqual(claude.models[1].name, 'Opus (latest)');
+});

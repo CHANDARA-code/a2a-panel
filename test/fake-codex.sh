@@ -11,6 +11,11 @@ fi
 CONFIG_DIR="${CODEX_HOME:-$HOME/.codex}"
 MARKER="$CONFIG_DIR/.signed-in"
 
+if [ "$1" = "debug" ] && [ "$2" = "models" ]; then
+  echo '{"models":[{"slug":"gpt-test-mini","display_name":"GPT Test Mini","visibility":"list","priority":5},{"slug":"internal-review","display_name":"Internal Review","visibility":"hide","priority":1},{"slug":"gpt-test","display_name":"GPT Test","visibility":"list","priority":0},{"slug":"bad model; rm","display_name":"Bad","visibility":"list","priority":9}]}'
+  exit 0
+fi
+
 if [ "$1" = "login" ] && [ "$2" = "status" ]; then
   if [ -f "$MARKER" ]; then
     echo "Logged in using ChatGPT" >&2

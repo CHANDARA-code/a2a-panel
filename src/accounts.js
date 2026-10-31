@@ -676,6 +676,35 @@ function saveStatus(id, status) {
   return getAccount(id);
 }
 
+const MODELS_TTL_MS = 10 * 60 * 1000;
+const modelLists = new Map();
+
+function listModels(id, { refresh = false } = {}) {
+  const account = getAccount(id);
+  if (!account) return Promise.reject(new AccountError(`Account "${id}" not found`, 404));
+  const cached = modelLists.get(id);
+  if (cached && (cached.pending || (!refresh && Date.now() - cached.at < MODELS_TTL_MS))) return cached.pending || Promise.resolve(cached.value);
+  const { modelsCommand, parseModels } = require('./providers');
+  const command = modelsCommand(account.provider);
+  const pending = new Promise((resolve) => {
+    execFile(command.bin, command.args, { env: accountEnv(account), timeout: 30000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => {
+      const models = parseModels(account.provider, stdout || '').filter((model) => MODEL_PATTERN.test(model.id));
+      const value = {
+        account: id,
+        provider: account.provider,
+        models,
+        source: [path.basename(command.bin), ...command.args].join(' '),
+        fetchedAt: new Date().toISOString(),
+        error: models.length ? null : err && err.code === 'ENOENT' ? `${path.basename(command.bin)} is not installed` : 'No models listed. Is this account signed in?'
+      };
+      modelLists.set(id, { at: Date.now(), value });
+      resolve(value);
+    });
+  });
+  modelLists.set(id, { at: cached ? cached.at : 0, value: cached ? cached.value : null, pending });
+  return pending;
+}
+
 function checkAccount(id) {
   return new Promise((resolve, reject) => {
     const account = getAccount(id);
@@ -732,6 +761,7 @@ module.exports = {
   deleteAccount,
   resolveAccount,
   accountEnv,
+  listModels,
   accountOverrides,
   checkAccount,
   markSignedOut,

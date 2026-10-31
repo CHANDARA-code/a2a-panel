@@ -161,7 +161,7 @@ When running `a2a-panel server start`:
 - **List Roles**: `GET http://127.0.0.1:5188/roles`
 - **Dispatch Task**: `POST http://127.0.0.1:5188/tasks/send`. Optional `preset` (a preset id, or `null` / `"none"` for none; omitted means the default preset) and optional `account` (account id). JSON-RPC `message/send` takes the same fields.
 - **Version and update** (panel API): `GET /api/version` (`?refresh=1` asks npm again, at most once a minute) returns the running and newest versions and how this copy was installed; `POST /api/update` (token required) installs the newest version with `npm install -g` and restarts the server.
-- **Accounts** (panel API, token required for changes): `GET /api/accounts`, `POST /api/accounts` (`{id, provider, label?, model?}`), `PUT /api/accounts/:id`, `DELETE /api/accounts/:id`, `POST /api/accounts/:id/check`, `POST /api/accounts/:id/login`, `POST /api/accounts/:id/logout`, `GET /api/accounts/logins/:loginId`, `POST /api/accounts/logins/:loginId/code`, `POST /api/accounts/logins/:loginId/cancel`.
+- **Accounts** (panel API, token required for changes): `GET /api/accounts`, `POST /api/accounts` (`{id, provider, label?, model?}`), `PUT /api/accounts/:id`, `DELETE /api/accounts/:id`, `POST /api/accounts/:id/check`, `GET /api/accounts/:id/models` (`?refresh=1` lists them again), `POST /api/accounts/:id/login`, `POST /api/accounts/:id/logout`, `GET /api/accounts/logins/:loginId`, `POST /api/accounts/logins/:loginId/code`, `POST /api/accounts/logins/:loginId/cancel`.
 - **Presets** (panel API, token required for changes): `GET /api/presets`, `POST /api/presets` (`{id, template?, from?, title?}`), `GET|PUT|DELETE /api/presets/:id`, `POST|DELETE /api/presets/:id/default`, and `POST /api/prompt-preview` (`{role, workspace, prompt, preset}`) to see the exact prompt.
 - **Task Status**: `GET http://127.0.0.1:5188/tasks/:id`. Returns status, output, `usage`, `verification`, `conversationId`, `changes`, `workspace`, `account` and `provider`. JSON-RPC `tasks/get` returns the same fields.
 - **Server-Sent Events Stream**: `GET http://127.0.0.1:5188/api/events` (`text/event-stream`). Streams real-time updates to the web panel so idle clients make no repeating polling requests. Emits initial burst on connect, then pushes updates only when data changes:
@@ -389,6 +389,16 @@ Account configurations and profiles are stored under `accounts/` in the data dir
 Adding an account always **adds** a sign-in next to the existing ones: it never replaces your default sign-in or another account's. Your real keychain, its search list and its settings are never modified.
 
 > **Limits of Antigravity isolation:** verified on macOS. On Linux, check that a new account shows signed out before you sign in. Added Antigravity accounts cannot use certificates from your real login keychain (for example iOS code signing); run signed builds on your default Antigravity account.
+
+### Choosing a model
+
+Wherever the panel asks for a model (an account's model, a team leader's model), it offers a list of the models that account can use, so you don't need to know model ids. The list comes from the account's own CLI, run with that account's sign-in, and is kept for 10 minutes (the refresh button asks again):
+
+- **Antigravity**: `agy models`, for example "Gemini 3.8 Flash (High)" or "Claude Opus 4.6 (Thinking)".
+- **Codex**: `codex debug models`, without the models Codex marks as hidden.
+- **Claude Code**: the aliases its `--help` names (`fable`, `opus`, `sonnet`), each meaning the newest model of that family. You can also type a full model name.
+
+Leaving the field empty uses the account's default model. A model id that is not in the list can still be typed and used.
 
 ### Signing In
 

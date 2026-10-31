@@ -11,6 +11,15 @@ fi
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 MARKER="$CONFIG_DIR/.signed-in"
 
+if [ "$1" = "--help" ]; then
+  echo "Options:"
+  echo "  --model <model>                       Model for the current session. Provide"
+  echo "                                        an alias for the latest model (e.g."
+  echo "                                        'fable', 'opus', or 'sonnet') or a"
+  echo "                                        model's full name."
+  exit 0
+fi
+
 if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
   if [ -n "$FAKE_CLAUDE_STATUS_DELAY" ]; then
     sleep "$FAKE_CLAUDE_STATUS_DELAY"

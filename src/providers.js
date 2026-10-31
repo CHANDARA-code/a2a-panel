@@ -107,6 +107,49 @@ function statusCommand(providerId) {
   throw new Error(`Unknown provider: ${providerId}`);
 }
 
+function modelsCommand(providerId) {
+  const bin = resolveBin(providerId);
+  if (providerId === 'agy') return { bin, args: ['models'] };
+  if (providerId === 'claude') return { bin, args: ['--help'] };
+  if (providerId === 'codex') return { bin, args: ['debug', 'models'] };
+  throw new Error(`Unknown provider: ${providerId}`);
+}
+
+function parseModels(providerId, stdout = '') {
+  if (providerId === 'agy') {
+    return stdout.split('\n')
+      .filter((line) => line.includes('\t'))
+      .map((line) => {
+        const [id, ...rest] = line.split('\t');
+        return { id: id.trim(), name: rest.join(' ').trim() || id.trim() };
+      });
+  }
+  if (providerId === 'claude') {
+    const text = stdout.replace(/\s+/g, ' ');
+    const match = text.match(/--model <model>.*?alias for the latest model \(e\.g\. ([^)]*)\)/i);
+    if (!match) return [];
+    return [...match[1].matchAll(/'([A-Za-z][\w-]*)'/g)].map(([, alias]) => ({
+      id: alias,
+      name: `${alias.charAt(0).toUpperCase()}${alias.slice(1)} (latest)`,
+      description: 'Alias for the newest model of this family'
+    }));
+  }
+  if (providerId === 'codex') {
+    let parsed;
+    try {
+      parsed = JSON.parse(stdout);
+    } catch (err) {
+      return [];
+    }
+    const list = Array.isArray(parsed) ? parsed : (parsed && parsed.models) || [];
+    return list
+      .filter((model) => model && typeof model.slug === 'string' && model.visibility !== 'hide')
+      .sort((a, b) => (Number(a.priority) || 0) - (Number(b.priority) || 0))
+      .map((model) => ({ id: model.slug, name: model.display_name || model.slug, description: model.description || undefined }));
+  }
+  throw new Error(`Unknown provider: ${providerId}`);
+}
+
 function parseStatus(providerId, { exitCode, stdout = '', stderr = '' }) {
   if (providerId === 'agy') {
     const lines = stdout.split('\n').filter((l) => l.includes('\t'));
@@ -206,6 +249,8 @@ module.exports = {
   statusCommand,
   parseStatus,
   loginArgs,
+  modelsCommand,
+  parseModels,
   logoutArgs,
   authFailurePattern,
   signInPromptPattern,

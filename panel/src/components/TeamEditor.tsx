@@ -20,6 +20,7 @@ import type { Account, PresetSummary, ProviderId, Role, Team, TeamMember } from 
 import { AccountStatusDot } from "./StatusTag";
 import { AccountAvatar } from "./AccountAvatar";
 import { ProviderIcon } from "./ProviderIcon";
+import { ModelSelect } from "./ModelSelect";
 
 interface TeamEditorProps {
   open: boolean;
@@ -64,6 +65,7 @@ interface FormValues {
 export function TeamEditor({ open, team, accounts, isMobile, onClose, onSaved }: TeamEditorProps) {
   const { message } = AntApp.useApp();
   const [form] = Form.useForm<FormValues>();
+  const leaderAccount = Form.useWatch(["leader", "account"], form);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [roles, setRoles] = useState<Role[]>([]);
@@ -310,8 +312,8 @@ export function TeamEditor({ open, team, accounts, isMobile, onClose, onSaved }:
           </Form.Item>
 
           <Flex gap={12} wrap>
-            <Form.Item name={["leader", "model"]} label="Model override (optional)" style={{ flex: "1 1 200px" }}>
-              <Input placeholder="e.g. claude-3-7-sonnet" allowClear />
+            <Form.Item name={["leader", "model"]} label="Model (optional)" style={{ flex: "1 1 260px" }}>
+              <ModelSelect accountId={leaderAccount} />
             </Form.Item>
             <Form.Item name={["leader", "effort"]} label="Effort" style={{ flex: "1 1 140px" }}>
               <Select options={EFFORT_OPTIONS} />

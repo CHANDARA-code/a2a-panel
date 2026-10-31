@@ -9,6 +9,7 @@ import { formatAgo, formatDateTime } from "../format";
 import { SignInModal } from "./SignInModal";
 import { AccountAvatar, loadAccounts } from "./AccountAvatar";
 import { AvatarModal } from "./AvatarModal";
+import { ModelSelect } from "./ModelSelect";
 import { ProviderIcon } from "./ProviderIcon";
 
 interface AccountsViewProps {
@@ -57,6 +58,7 @@ export function AccountsView({ isMobile }: AccountsViewProps) {
   const [addOpen, setAddOpen] = useState(false);
   const [addSubmitting, setAddSubmitting] = useState(false);
   const [addForm] = Form.useForm<AddFormValues>();
+  const addProvider = Form.useWatch("provider", addForm);
 
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
   const [editSubmitting, setEditSubmitting] = useState(false);
@@ -738,8 +740,8 @@ export function AccountsView({ isMobile }: AccountsViewProps) {
                     <Form.Item name="label" label="Label">
                       <Input placeholder="Descriptive name (e.g. Work Claude)" />
                     </Form.Item>
-                    <Form.Item name="model" label="Model (optional)">
-                      <Input placeholder="Leave empty to use the default model" />
+                    <Form.Item name="model" label="Model (optional)" extra="Models your default sign-in for this tool can use.">
+                      <ModelSelect accountId={addProvider} placeholder="Default model" />
                     </Form.Item>
                     <Flex justify="flex-end" gap={8}>
                       <Button type="primary" htmlType="submit" loading={addSubmitting}>
@@ -768,7 +770,7 @@ export function AccountsView({ isMobile }: AccountsViewProps) {
             <Input placeholder="Label" />
           </Form.Item>
           <Form.Item name="model" label="Model (optional)">
-            <Input placeholder="e.g. claude-3-7-sonnet" allowClear />
+            <ModelSelect accountId={editingAccount?.id} placeholder="Default model" />
           </Form.Item>
         </Form>
       </Modal>

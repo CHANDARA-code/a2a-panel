@@ -481,7 +481,7 @@ async function handleAccounts(req, res, method, pathname) {
     return true;
   }
 
-  const accountMatch = pathname.match(/^\/api\/accounts(?:\/([\w-]+)(?:\/(check|login|logout))?)?$/);
+  const accountMatch = pathname.match(/^\/api\/accounts(?:\/([\w-]+)(?:\/(check|login|logout|models))?)?$/);
   if (!accountMatch) return false;
   const [, id, action] = accountMatch;
 
@@ -533,6 +533,14 @@ async function handleAccounts(req, res, method, pathname) {
     await run(() => {
       accounts.deleteAccount(id);
       sendJson(res, 200, { deleted: id });
+    });
+    return true;
+  }
+
+  if (id && action === 'models' && method === 'GET') {
+    await run(async () => {
+      const url = new URL(req.url, 'http://127.0.0.1');
+      sendJson(res, 200, await accounts.listModels(id, { refresh: url.searchParams.get('refresh') === '1' }));
     });
     return true;
   }

@@ -424,6 +424,21 @@ export interface VersionInfo {
   };
 }
 
+export interface AccountModel {
+  id: string;
+  name: string;
+  description?: string;
+}
+
+export interface AccountModels {
+  account: string;
+  provider: ProviderId;
+  models: AccountModel[];
+  source: string;
+  fetchedAt: string;
+  error: string | null;
+}
+
 export const api = {
   health: () => request<Health>("/api/health"),
   version: (refresh = false) => request<VersionInfo>(`/api/version${refresh ? "?refresh=1" : ""}`),
@@ -448,6 +463,8 @@ export const api = {
   previewPrompt: (input: { role: string; workspace: string; prompt: string; preset: string | null }) =>
     request<PromptPreview>("/api/prompt-preview", { method: "POST", body: JSON.stringify(input) }),
   accounts: () => request<{ accounts: Account[]; providers: Provider[] }>("/api/accounts"),
+  accountModels: (id: string, refresh = false) =>
+    request<AccountModels>(`/api/accounts/${encodeURIComponent(id)}/models${refresh ? "?refresh=1" : ""}`),
   setAvatar: (id: string, image: string) =>
     request<{ account: Account }>(`/api/accounts/${id}/avatar`, { method: "PUT", body: JSON.stringify({ image }) }).then((r) => r.account),
   deleteAvatar: (id: string) =>
