@@ -68,6 +68,7 @@ export function ModelSelect({ accountId, value, onChange, placeholder = "Account
         style={{ flex: 1, minWidth: 0 }}
         showSearch
         allowClear
+        popupMatchSelectWidth={false}
         value={value || undefined}
         placeholder={placeholder}
         loading={loading}
