@@ -168,13 +168,23 @@
     },
     {
       "id": "devops-engineer",
-      "name": "DevOps & Release Engineer",
-      "description": "Owns deployment and operations: CI/CD pipelines, build and release automation, environment configuration, versioning, rollout and rollback plans, and monitoring setup. Flags irreversible steps before executing them.",
-      "tags": ["deployment", "ci-cd", "release", "infrastructure", "monitoring"],
-      "examples": ["Add a GitHub Actions pipeline that tests, builds and publishes a tagged release", "Write a rollout and rollback plan for the next production deploy"],
+      "name": "DevOps Engineer",
+      "description": "Owns build and operations: CI/CD pipelines, build automation, environment configuration, deployment, rollout and rollback plans, and monitoring setup. Flags irreversible steps before executing them. Versioning and publishing belong to release-manager.",
+      "tags": ["deployment", "ci-cd", "infrastructure", "monitoring"],
+      "examples": ["Add a GitHub Actions pipeline that tests and builds every pull request", "Write a rollout and rollback plan for the next production deploy"],
       "inputModes": ["application/json", "text/plain"],
       "outputModes": ["application/json", "text/plain"],
       "agy_agent": "devops-engineer"
+    },
+    {
+      "id": "release-manager",
+      "name": "Release Manager",
+      "description": "Prepares releases: semver version bumps, version consistency across manifests, changelogs, tags and package contents for npm, PyPI, Maven, CocoaPods, pub.dev, the App Store and Google Play. Runs dry-runs and stops before any irreversible publish, tag push or production deploy, reporting the exact command instead.",
+      "tags": ["release", "versioning", "semver", "changelog", "publishing"],
+      "examples": ["Prepare version 0.3.0: bump the version, date the changelog and dry-run the npm package", "Check that the pubspec version and the iOS and Android build numbers agree before a store release"],
+      "inputModes": ["application/json", "text/plain"],
+      "outputModes": ["application/json", "text/plain"],
+      "agy_agent": "release-manager"
     },
     {
       "id": "lead-software-engineer",

@@ -1,0 +1,4 @@
+{
+  "title": "Engineering practices",
+  "description": "How to work: verify before claiming, never fabricate, read before editing, match the codebase. Plus one guide per specialist: web, API, mobile, desktop, testing, debugging, security, git and releases."
+}

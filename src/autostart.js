@@ -2,13 +2,13 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
-const { DATA_DIR } = require('./config');
+const { DATA_DIR, PACKAGE_ROOT } = require('./config');
 
 // Start the HTTP server (and so the dashboard) when the user logs in:
 // a LaunchAgent on macOS, a systemd user service on Linux.
 const LABEL = 'com.a2a-panel.server';
 const UNIT = 'a2a-panel.service';
-const SERVER_PATH = path.join(__dirname, 'server.js');
+const SERVER_PATH = path.join(PACKAGE_ROOT, 'server.js');
 // Variables the server reads; they are copied into the service when it is enabled.
 const PASSED_ENV = /^(A2A_[A-Z_]+|AGY_BIN)$/;
 
@@ -157,9 +157,8 @@ function enable({ dryRun = false } = {}) {
   fs.mkdirSync(logDir(), { recursive: true });
   const steps = [];
   if (kind === 'launchd') {
-    run('launchctl', ['bootout', launchdTarget()]);
     fs.writeFileSync(file, content);
-    const loaded = run('launchctl', ['bootstrap', launchdDomain(), file]);
+    const loaded = reloadLaunchd(file);
     if (!loaded.ok) throw new Error(`launchctl bootstrap failed: ${loaded.output}`);
     steps.push(`launchctl bootstrap ${launchdDomain()} ${file}`);
   } else {
@@ -187,6 +186,25 @@ function disable() {
   return true;
 }
 
+function pause(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function reloadLaunchd(file) {
+  run('launchctl', ['bootout', launchdTarget()]);
+  let loaded = { ok: false, output: 'the old service did not unload' };
+  for (let attempt = 0; attempt < 20; attempt++) {
+    if (run('launchctl', ['print', launchdTarget()]).ok) {
+      pause(250);
+      continue;
+    }
+    loaded = run('launchctl', ['bootstrap', launchdDomain(), file]);
+    if (loaded.ok) return loaded;
+    pause(250);
+  }
+  return loaded;
+}
+
 // start/stop/restart for "a2a-panel server ..." when the service is installed.
 function start() {
   if (platform() === 'launchd') {
@@ -203,8 +221,7 @@ function stop() {
 function restart() {
   if (platform() === 'launchd') {
     // Reload instead of "kickstart -k": a respawn waits out ThrottleInterval, a fresh bootstrap does not.
-    run('launchctl', ['bootout', launchdTarget()]);
-    return run('launchctl', ['bootstrap', launchdDomain(), plistPath()]);
+    return reloadLaunchd(plistPath());
   }
   return run('systemctl', ['--user', 'restart', UNIT]);
 }

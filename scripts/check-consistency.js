@@ -52,19 +52,19 @@ if (card) {
 
 const mcpSource = (() => {
   try {
-    return read('mcp-server.js');
+    return read('src/mcp-server.js');
   } catch (err) {
-    fail('mcp-server.js is missing');
+    fail('src/mcp-server.js is missing');
     return '';
   }
 })();
 const enumMatch = /role:\s*\{[\s\S]*?enum:\s*\[([\s\S]*?)\]/.exec(mcpSource);
 if (!enumMatch) {
-  fail('could not find the role enum in mcp-server.js');
+  fail('could not find the role enum in src/mcp-server.js');
 } else {
   const mcpRoles = [...enumMatch[1].matchAll(/'([\w-]+)'/g)].map((match) => match[1]);
   if (card && !sameSet(cardRoles, mcpRoles)) {
-    fail(`mcp-server.js role enum [${mcpRoles.join(', ')}] differs from agent-card.json roles [${cardRoles.join(', ')}]`);
+    fail(`src/mcp-server.js role enum [${mcpRoles.join(', ')}] differs from agent-card.json roles [${cardRoles.join(', ')}]`);
   }
 }
 

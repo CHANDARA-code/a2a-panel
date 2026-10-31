@@ -29,3 +29,40 @@ export function formatUptime(seconds: number): string {
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
   return `${Math.floor(seconds / 86400)}d`;
 }
+
+export function formatCompactNumber(num: number): string {
+  const abs = Math.abs(num);
+  if (abs >= 1_000_000_000) {
+    const val = (num / 1_000_000_000).toFixed(1).replace(/\.0$/, "");
+    return `${val}B`;
+  }
+  if (abs >= 1_000_000) {
+    const val = (num / 1_000_000).toFixed(1).replace(/\.0$/, "");
+    return `${val}M`;
+  }
+  if (abs >= 1_000) {
+    const val = (num / 1_000).toFixed(1).replace(/\.0$/, "");
+    return `${val}k`;
+  }
+  return `${num}`;
+}
+
+export function formatDurationUntil(iso: string | null): string {
+  if (!iso) return "-";
+  const target = new Date(iso).getTime();
+  if (Number.isNaN(target)) return "-";
+  const diffMs = target - Date.now();
+  if (diffMs <= 0) return "0m";
+  const totalSeconds = Math.floor(diffMs / 1000);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  if (totalMinutes < 60) return `${totalMinutes}m`;
+  const hours = Math.floor(totalMinutes / 60);
+  const remainingMinutes = totalMinutes % 60;
+  if (hours < 24) {
+    return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+  }
+  const days = Math.floor(hours / 24);
+  const remainingHours = hours % 24;
+  return remainingHours > 0 ? `${days}d ${remainingHours}h` : `${days}d`;
+}

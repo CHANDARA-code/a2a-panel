@@ -8,3 +8,5 @@ panel/dist/
 .DS_Store
 server.pid
 presets/
+accounts/
+teams/

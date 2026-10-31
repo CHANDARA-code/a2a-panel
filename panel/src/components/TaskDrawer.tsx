@@ -4,8 +4,8 @@ import { CopyOutlined, FileMarkdownOutlined, ReloadOutlined, StopOutlined } from
 import { api } from "../api";
 import type { Task } from "../api";
 import { formatDateTime, formatDuration } from "../format";
-import { usePolling } from "../hooks";
 import { StatusTag } from "./StatusTag";
+import { AccountAvatar } from "./AccountAvatar";
 
 interface TaskDrawerProps {
   taskId: string | null;
@@ -23,12 +23,54 @@ export function TaskDrawer({ taskId, summary, isMobile, cancelling, onClose, onC
   const open = taskId !== null;
   const [follow, setFollow] = useState(true);
   const logRef = useRef<HTMLPreElement>(null);
+  const [detail, setDetail] = useState<Task | null>(null);
+  const [log, setLog] = useState<string>("");
+  const [loadingLog, setLoadingLog] = useState<boolean>(false);
 
-  const detail = usePolling(() => api.task(taskId as string), 2500, open, taskId);
-  const task: Task | undefined = detail.data && detail.data.id === taskId ? detail.data : summary;
-  const running = task?.status === "running";
-  const logPolling = usePolling(() => api.log(taskId as string), running ? 2000 : 15000, open, taskId);
-  const log = logPolling.data ?? "";
+  useEffect(() => {
+    if (!open || !taskId) {
+      setDetail(null);
+      setLog("");
+      setLoadingLog(false);
+      return;
+    }
+    let cancelled = false;
+    setLoadingLog(true);
+    api.task(taskId)
+      .then((t) => {
+        if (!cancelled) setDetail(t);
+      })
+      .catch(() => {});
+    api.log(taskId)
+      .then((l) => {
+        if (!cancelled) {
+          setLog(l);
+          setLoadingLog(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setLoadingLog(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, taskId, summary?.updatedAt, summary?.status]);
+
+  const task: Task | undefined = detail && detail.id === taskId ? detail : summary;
+  const fallbackActive = open && !summary && task?.status === "running";
+
+  useEffect(() => {
+    if (!fallbackActive || !taskId) return;
+    const timer = setInterval(() => {
+      api.task(taskId)
+        .then((t) => setDetail(t))
+        .catch(() => {});
+      api.log(taskId)
+        .then((l) => setLog(l))
+        .catch(() => {});
+    }, 2500);
+    return () => clearInterval(timer);
+  }, [fallbackActive, taskId]);
 
   useEffect(() => {
     if (follow && logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
@@ -101,6 +143,17 @@ export function TaskDrawer({ taskId, summary, isMobile, cancelling, onClose, onC
             column={{ xs: 1, md: 2 }}
             items={[
               { key: "id", label: "Task ID", span: { xs: 1, md: 2 }, children: <Typography.Text copyable code>{task.id}</Typography.Text> },
+              {
+                key: "account",
+                label: "Account",
+                span: { xs: 1, md: 2 },
+                children: (
+                  <Flex align="center" gap={8}>
+                    <AccountAvatar accountId={task.account ?? "agy"} size={20} />
+                    <Tag style={{ marginInlineEnd: 0 }}>{task.account ?? "agy"}</Tag>
+                  </Flex>
+                ),
+              },
               { key: "workspace", label: "Workspace", span: { xs: 1, md: 2 }, children: <Typography.Text copyable style={{ wordBreak: "break-all" }}>{task.workspace}</Typography.Text> },
               {
                 key: "preset",
@@ -153,7 +206,7 @@ export function TaskDrawer({ taskId, summary, isMobile, cancelling, onClose, onC
                 color: token.colorText,
               }}
             >
-              {log || (logPolling.loading ? "Loading log..." : "No output yet.")}
+              {log || (loadingLog ? "Loading log..." : "No output yet.")}
             </pre>
           </div>
         </Flex>

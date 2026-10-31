@@ -1,10 +1,11 @@
 const { spawn, execFileSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
-const { createStreamParser } = require('./agy-stream');
 const { resolvePreferences } = require('./presets');
+const { resolveBin, buildCommand, createParser, authFailurePattern, signInPromptPattern } = require('./providers');
+const { resolveAccount, accountEnv, markSignedOut } = require('./accounts');
 
-const { DATA_DIR } = require('./config');
+const { DATA_DIR, PACKAGE_ROOT } = require('./config');
 
 function resolveAgyBin() {
   if (process.env.AGY_BIN) return process.env.AGY_BIN;
@@ -20,9 +21,9 @@ function resolveAgyBin() {
 }
 
 const AGY_BIN = resolveAgyBin();
-const AGENT_CARD_PATH = fs.existsSync(path.join(__dirname, 'agent-card.json'))
-  ? path.join(__dirname, 'agent-card.json')
-  : path.join(__dirname, 'agent.json');
+const AGENT_CARD_PATH = fs.existsSync(path.join(PACKAGE_ROOT, 'agent-card.json'))
+  ? path.join(PACKAGE_ROOT, 'agent-card.json')
+  : path.join(PACKAGE_ROOT, 'agent.json');
 
 const LOGS_DIR = process.env.A2A_LOGS_DIR || path.join(DATA_DIR, 'logs');
 if (!fs.existsSync(LOGS_DIR)) {
@@ -105,11 +106,28 @@ function isGroupAlive(pid) {
 }
 
 function commandRunsAgent(command) {
-  const base = path.basename(AGY_BIN);
-  return command.split(/\s+/).slice(0, 2).some((token) => path.basename(token) === base);
+  const bins = [
+    resolveBin('agy'),
+    resolveBin('claude'),
+    resolveBin('codex')
+  ];
+  if (process.env.AGY_BIN) bins.push(process.env.AGY_BIN);
+  if (process.env.CLAUDE_BIN) bins.push(process.env.CLAUDE_BIN);
+  if (process.env.CODEX_BIN) bins.push(process.env.CODEX_BIN);
+  const basenames = new Set(bins.map((b) => path.basename(b)));
+  return command.split(/\s+/).slice(0, 3).some((token) => basenames.has(path.basename(token)));
+}
+
+function verifyMarkerPath(taskId) {
+  return path.join(LOGS_DIR, `${taskId}.verify`);
 }
 
 function isTaskProcessLive(taskId, pid) {
+  if (fs.existsSync(verifyMarkerPath(taskId))) {
+    const recordedStart = readTaskStart(taskId);
+    if (recordedStart && processStart(pid) !== recordedStart) return false;
+    return isGroupAlive(pid);
+  }
   const command = processCommand(pid);
   if (command) {
     const recordedStart = readTaskStart(taskId);
@@ -234,7 +252,7 @@ function countRunningTasks() {
 const NO_WORK_SIGNALS = /no output produced|do not have access to (?:command|file|direct)|does not provide direct file|no file[- ]write or terminal|not provisioned/i;
 
 const PLUGINS_DIR = process.env.A2A_PLUGINS_DIR || path.join(process.env.HOME || '', '.gemini', 'config', 'plugins');
-const PERSONAS_DIR = path.join(__dirname, 'personas');
+const PERSONAS_DIR = path.join(PACKAGE_ROOT, 'personas');
 const PERSONA_LIMIT = 6000;
 
 function readPersona(file) {
@@ -260,10 +278,12 @@ function loadRolePersona(role) {
 const USAGE_LOG = path.join(LOGS_DIR, 'usage.jsonl');
 const CONVERSATION_ID_PATTERN = /^[A-Za-z0-9][\w-]{7,63}$/;
 const MODEL_PATTERN = /^[A-Za-z0-9][\w.:-]{0,63}$/;
+const TASK_MODES = ['accept-edits', 'plan', 'auto'];
+const TASK_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 const CHANGES_LIMIT = 2000;
 const VERIFY_OUTPUT_LIMIT = 4000;
 
-function runVerification(command, cwd, logStream) {
+function runVerification(command, cwd, logStream, taskId) {
   const timeoutMs = envInt('A2A_VERIFY_TIMEOUT_MS', 600000);
   const startedAt = Date.now();
   logStream.write(`\n=== VERIFICATION (run by a2a-panel, not the agent): ${command} ===\n`);
@@ -272,6 +292,14 @@ function runVerification(command, cwd, logStream) {
     let timedOut = false;
     let settled = false;
     const child = spawn('sh', ['-c', command], { cwd, env: { ...process.env }, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+    const trackFiles = taskId && child.pid ? [`${taskId}.pid`, `${taskId}.start`, `${taskId}.verify`].map((file) => path.join(LOGS_DIR, file)) : [];
+    if (trackFiles.length) {
+      try {
+        fs.writeFileSync(trackFiles[2], command);
+        fs.writeFileSync(trackFiles[1], processStart(child.pid));
+        fs.writeFileSync(trackFiles[0], String(child.pid));
+      } catch (err) {}
+    }
     const onData = (data) => {
       const text = data.toString('utf-8');
       logStream.write(text);
@@ -282,6 +310,7 @@ function runVerification(command, cwd, logStream) {
       if (settled) return;
       settled = true;
       killTimers.forEach(clearTimeout);
+      for (const file of trackFiles) fs.rmSync(file, { force: true });
       if (extra) tail = (tail + extra).slice(-VERIFY_OUTPUT_LIMIT);
       const passed = exitCode === 0 && !timedOut;
       logStream.write(`\n=== VERIFICATION ${passed ? 'PASSED' : 'FAILED'} (exit ${exitCode}${timedOut ? ', timed out' : ''}) ===\n`);
@@ -323,6 +352,11 @@ function workspaceChanges(cwd) {
 
 function recordUsage(taskRecord) {
   if (!taskRecord.usage) return;
+  const models = taskRecord.models || {
+    [taskRecord.model || 'default']: {
+      total_tokens: Number(taskRecord.usage.total_tokens) || 0
+    }
+  };
   const entry = {
     at: new Date().toISOString(),
     taskId: taskRecord.id,
@@ -331,7 +365,10 @@ function recordUsage(taskRecord) {
     model: taskRecord.model || null,
     conversationId: taskRecord.conversationId || null,
     durationSeconds: taskRecord.durationSeconds || null,
-    usage: taskRecord.usage
+    account: taskRecord.account || 'agy',
+    provider: taskRecord.provider || 'agy',
+    usage: taskRecord.usage,
+    models
   };
   try {
     fs.appendFileSync(USAGE_LOG, JSON.stringify(entry) + '\n');
@@ -339,7 +376,16 @@ function recordUsage(taskRecord) {
 }
 
 function readUsageTotals() {
-  const totals = { tasks: 0, input_tokens: 0, output_tokens: 0, thinking_tokens: 0, cache_read_tokens: 0, total_tokens: 0, byRole: {} };
+  const totals = {
+    tasks: 0,
+    input_tokens: 0,
+    output_tokens: 0,
+    thinking_tokens: 0,
+    cache_read_tokens: 0,
+    total_tokens: 0,
+    byRole: {},
+    byAccount: {}
+  };
   let lines = [];
   try {
     lines = fs.readFileSync(USAGE_LOG, 'utf-8').split('\n');
@@ -363,12 +409,17 @@ function readUsageTotals() {
     const perRole = totals.byRole[role] || (totals.byRole[role] = { tasks: 0, total_tokens: 0 });
     perRole.tasks++;
     perRole.total_tokens += Number(usage.total_tokens) || 0;
+    const accountId = entry.account || 'agy';
+    const provider = entry.provider || 'agy';
+    const perAccount = totals.byAccount[accountId] || (totals.byAccount[accountId] = { provider, tasks: 0, total_tokens: 0 });
+    perAccount.tasks++;
+    perAccount.total_tokens += Number(usage.total_tokens) || 0;
   }
   return totals;
 }
 
 // The full prompt an agent receives: role persona, user preferences, task, criteria, verification step.
-function buildTaskPrompt({ role, prompt, workspace, preset, acceptance_criteria, verification_command }) {
+function buildTaskPrompt({ role, prompt, workspace, preset, acceptance_criteria, verification_command, persona = true }) {
   const card = getAgentCard();
   const list = card.skills || card.roles || [];
   const skillConfig = list.find(r => r.id === role);
@@ -376,9 +427,11 @@ function buildTaskPrompt({ role, prompt, workspace, preset, acceptance_criteria,
   const preferences = resolvePreferences({ preset, role: role || 'lead-software-engineer', workspace });
 
   const sections = [];
-  const rolePersona = loadRolePersona(agyAgentName);
-  if (rolePersona) sections.push(`### YOUR ROLE (${agyAgentName})\n${rolePersona}`);
-  if (preferences.text) sections.push(preferences.text);
+  if (persona !== false) {
+    const rolePersona = loadRolePersona(agyAgentName);
+    if (rolePersona) sections.push(`### YOUR ROLE (${agyAgentName})\n${rolePersona}`);
+    if (preferences.text) sections.push(preferences.text);
+  }
   let finalPrompt = sections.length ? `${sections.join('\n\n')}\n\n### TASK\n${prompt}` : prompt;
   if (acceptance_criteria) {
     const formattedCriteria = Array.isArray(acceptance_criteria)
@@ -396,7 +449,7 @@ function preferenceFileList(preferences) {
   return preferences.files.map((file) => (file.source === 'workspace' ? `${file.name} (workspace)` : file.name)).join(', ');
 }
 
-function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = 'high', model, conversation_id, preset, acceptance_criteria, verification_command, onChunk, onDone, onError }) {
+function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = 'high', model, conversation_id, preset, acceptance_criteria, verification_command, account, persona = true, onChunk, onDone, onError }) {
   if (typeof prompt !== 'string' || !prompt.trim() || prompt.trim().startsWith('--')) {
     throw new Error('Invalid task prompt: ' + JSON.stringify(prompt) + ' (empty or looks like a CLI flag)');
   }
@@ -405,6 +458,12 @@ function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = '
   }
   if (model && !MODEL_PATTERN.test(model)) {
     throw new Error('Invalid model name');
+  }
+  if (!TASK_MODES.includes(mode)) {
+    throw new Error(`Unsupported mode ${JSON.stringify(mode)}. Use "plan" (read-only), "accept-edits" or "auto".`);
+  }
+  if (!TASK_EFFORTS.includes(effort)) {
+    throw new Error(`Unsupported effort ${JSON.stringify(effort)}. Use ${TASK_EFFORTS.join(', ')}.`);
   }
   const { wallMs, idleMs, maxConcurrent, maxOutputChars } = limits();
   pruneOldLogs();
@@ -419,27 +478,42 @@ function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = '
     throw new Error('Workspace does not exist: ' + workspace);
   }
   const targetCwd = workspace || process.cwd();
-  if (path.resolve(targetCwd) === __dirname) {
+  if (path.resolve(targetCwd) === PACKAGE_ROOT) {
     throw new Error('A workspace path is required (refusing to run agents inside the bridge directory)');
   }
 
-  const { finalPrompt, preferences } = buildTaskPrompt({ role, prompt, workspace: targetCwd, preset, acceptance_criteria, verification_command });
+  const resolvedAcc = resolveAccount(account);
+  if (resolvedAcc.budget && resolvedAcc.budget.stop) {
+    const { getBudgetUsed } = require('./usage');
+    const bUsed = getBudgetUsed(resolvedAcc);
+    if (bUsed && bUsed.tokens >= resolvedAcc.budget.tokens) {
+      throw new Error(`Account ${resolvedAcc.id} reached its ${resolvedAcc.budget.period} budget of ${resolvedAcc.budget.tokens} tokens (used ${bUsed.tokens}). Raise the budget or pick another account.`);
+    }
+  }
+  const provider = resolvedAcc.provider;
+  const effectiveModel = model || resolvedAcc.model || null;
+  if (effectiveModel && !MODEL_PATTERN.test(effectiveModel)) {
+    throw new Error(`Invalid model name on account ${resolvedAcc.id}`);
+  }
 
-  const args = [
-    '-p', finalPrompt,
-    '--mode', mode,
-    '--effort', effort,
-    '--output-format', 'stream-json',
-    '--add-dir', targetCwd,
-    '--dangerously-skip-permissions'
-  ];
-  if (model) args.push('--model', model);
-  if (conversation_id) args.push('--conversation', conversation_id);
+  const { finalPrompt, preferences } = buildTaskPrompt({ role, prompt, workspace: targetCwd, preset, acceptance_criteria, verification_command, persona });
+
+  const cmd = buildCommand(provider, {
+    prompt: finalPrompt,
+    mode,
+    effort,
+    model: effectiveModel,
+    conversationId: conversation_id,
+    workspace: targetCwd
+  });
+  const env = accountEnv(resolvedAcc, process.env);
 
   const logFilePath = path.join(LOGS_DIR, `${taskId}.log`);
   fs.writeFileSync(logFilePath, [
     `=== TASK STARTED: ${taskId} ===`,
     `Role: ${role || 'lead-software-engineer'}`,
+    `Account: ${resolvedAcc.id}`,
+    `Provider: ${provider}`,
     `Workspace: ${targetCwd}`,
     `Preset: ${preferences.presetId || 'none'}`,
     `Preferences: ${preferenceFileList(preferences) || 'none'}`,
@@ -452,6 +526,8 @@ function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = '
   const taskRecord = {
     id: taskId,
     role: role || 'lead-software-engineer',
+    account: resolvedAcc.id,
+    provider,
     prompt,
     workspace: targetCwd,
     status: 'running',
@@ -459,7 +535,7 @@ function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = '
     finishedAt: null,
     logFile: logFilePath,
     output: '',
-    model: model || null,
+    model: effectiveModel,
     preset: preferences.presetId,
     preferenceFiles: preferences.files.map((file) => ({ name: file.name, source: file.source })),
     conversationId: conversation_id || null,
@@ -472,12 +548,18 @@ function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = '
 
   activeTasks.set(taskId, taskRecord);
 
-  const proc = spawn(AGY_BIN, args, {
+  const proc = spawn(cmd.bin, cmd.args, {
     cwd: targetCwd,
-    env: { ...process.env },
-    stdio: ['ignore', 'pipe', 'pipe'],
+    env,
+    stdio: cmd.stdin !== null ? ['pipe', 'pipe', 'pipe'] : ['ignore', 'pipe', 'pipe'],
     detached: true
   });
+
+  if (cmd.stdin !== null && proc.stdin) {
+    proc.stdin.on('error', () => {});
+    proc.stdin.write(cmd.stdin);
+    proc.stdin.end();
+  }
 
   taskRecord.process = proc;
   logStream.on('error', () => {});
@@ -552,29 +634,55 @@ function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = '
     if (onChunk) onChunk(text);
   };
 
-  const parser = createStreamParser({
+  const parser = createParser(provider, {
     onText: appendOutput,
     onLog: (text) => logStream.write(text),
     onInit: (conversationId) => {
       if (conversationId) taskRecord.conversationId = conversationId;
     },
+    onRateLimit: (info) => {
+      if (provider === 'claude') taskRecord.rateLimitInfo = info;
+      if (provider === 'codex') taskRecord.rateLimits = info;
+    },
     onResult: (result) => {
-      taskRecord.agyStatus = result.status || null;
+      taskRecord.agentStatus = result.status || null;
+      if (result.status !== 'SUCCESS' && result.error) {
+        taskRecord.agentError = result.error;
+      }
       taskRecord.usage = result.usage || null;
+      if (result.models) taskRecord.models = result.models;
+      if (result.rateLimitInfo) taskRecord.rateLimitInfo = result.rateLimitInfo;
+      if (result.rateLimits) taskRecord.rateLimits = result.rateLimits;
       taskRecord.durationSeconds = result.duration_seconds || null;
       if (result.conversation_id) taskRecord.conversationId = result.conversation_id;
       if (!taskRecord.output && typeof result.response === 'string') appendOutput(result.response);
     }
   });
 
+  const signInPrompt = signInPromptPattern(provider);
+  let signInDetected = false;
+  let stdoutTail = '';
   proc.stdout.on('data', (data) => {
     lastOutputAt = Date.now();
-    parser.push(data.toString('utf-8'));
+    const text = data.toString('utf-8');
+    parser.push(text);
+    stdoutTail = (stdoutTail + text).slice(-4000);
+    if (signInPrompt && signInPrompt.test(stdoutTail)) {
+      signInDetected = true;
+      expire(`Account ${resolvedAcc.id} asked for a sign-in instead of running the task`);
+    }
   });
 
+  let stderrTail = '';
   proc.stderr.on('data', (data) => {
     lastOutputAt = Date.now();
-    appendOutput(data.toString('utf-8'));
+    const text = data.toString('utf-8');
+    stderrTail = (stderrTail + text).slice(-4000);
+    appendOutput(text);
+    if (signInPrompt && signInPrompt.test(stderrTail)) {
+      signInDetected = true;
+      expire(`Account ${resolvedAcc.id} asked for a sign-in instead of running the task`);
+    }
   });
 
   proc.on('error', (err) => {
@@ -603,14 +711,25 @@ function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = '
         taskRecord.status = 'failed';
         taskRecord.error = taskRecord.timeoutReason;
         logStream.write(`\n[A2A] Marked failed: ${taskRecord.timeoutReason}\n`);
-      } else if (code === 0 && taskRecord.agyStatus && taskRecord.agyStatus !== 'SUCCESS') {
+      } else if (code === 0 && taskRecord.agentStatus && taskRecord.agentStatus !== 'SUCCESS') {
         taskRecord.status = 'failed';
-        taskRecord.error = `Agent finished with status ${taskRecord.agyStatus}`;
+        taskRecord.error = taskRecord.agentError || `Agent finished with status ${taskRecord.agentStatus}`;
         logStream.write(`\n[A2A] Marked failed: ${taskRecord.error}\n`);
       } else if (code === 0 && NO_WORK_SIGNALS.test(taskRecord.output)) {
         taskRecord.status = 'failed';
         taskRecord.error = 'Agent reported it could not edit files or run commands; no work was done';
         logStream.write('\n[A2A] Marked failed: the agent output says it had no file or shell tools.\n');
+      }
+    }
+    if (taskRecord.status === 'failed') {
+      const authPattern = authFailurePattern(provider);
+      const failureText = `${taskRecord.agentError || ''}\n${stderrTail}`;
+      if (signInDetected || authPattern.test(failureText)) {
+        markSignedOut(resolvedAcc.id, 'Authentication failed during task');
+        const match = failureText.match(authPattern);
+        const detail = match ? match[0] : 'sign-in required';
+        taskRecord.error = `Account ${resolvedAcc.id} is not signed in (${detail}). Sign in again from the panel (Accounts) or with "a2a-panel accounts login ${resolvedAcc.id}".`;
+        logStream.write(`\n[A2A] Marked failed: ${taskRecord.error}\n`);
       }
     }
     const finalize = () => {
@@ -619,6 +738,27 @@ function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = '
       taskRecord.process = null;
       taskRecord.changes = workspaceChanges(targetCwd);
       recordUsage(taskRecord);
+      try {
+        const { parseClaudeQuota, parseCodexQuota, findCodexRolloutRateLimits, checkAgyQuotaExhaustion } = require('./usage');
+        const { updateAccountLimits } = require('./accounts');
+        let newLimits = null;
+        if (provider === 'claude') {
+          newLimits = parseClaudeQuota(taskRecord.rateLimitInfo, taskRecord);
+        } else if (provider === 'codex') {
+          let rl = taskRecord.rateLimits;
+          if (!rl) {
+            rl = findCodexRolloutRateLimits(resolvedAcc, taskRecord.conversationId);
+          }
+          if (rl) {
+            newLimits = parseCodexQuota(rl);
+          }
+        } else if (provider === 'agy') {
+          newLimits = checkAgyQuotaExhaustion(taskRecord, stderrTail);
+        }
+        if (newLimits) {
+          updateAccountLimits(resolvedAcc.id, newLimits);
+        }
+      } catch (err) {}
       removeProcessFiles();
       logStream.write(`\n\n=== TASK FINISHED: Exit code ${code} (${taskRecord.status}) ===\n`);
       logStream.end();
@@ -631,10 +771,14 @@ function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = '
     }
     removeProcessFiles();
     taskRecord.status = 'running';
-    runVerification(verification_command, targetCwd, logStream).then((verification) => {
+    runVerification(verification_command, targetCwd, logStream, taskId).then((verification) => {
       taskRecord.verification = verification;
       taskRecord.status = 'completed';
-      if (!verification.passed) {
+      if (fs.existsSync(cancelMarkerPath(taskId))) {
+        taskRecord.status = 'cancelled';
+        taskRecord.error = 'Cancelled while the verification command was running';
+        logStream.write(`\n[A2A] ${taskRecord.error}\n`);
+      } else if (!verification.passed) {
         taskRecord.status = 'failed';
         taskRecord.error = verification.timedOut
           ? `Verification timed out: ${verification_command}`
@@ -658,14 +802,18 @@ function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = '
   };
 }
 
+const runTask = runAgyTask;
+
 module.exports = {
   AGY_BIN,
   getAgentCard,
   buildTaskPrompt,
+  runTask,
   runAgyTask,
   cancelTask,
   isTaskProcessLive,
   readUsageTotals,
+  countRunningTasks,
   USAGE_LOG,
   activeTasks,
   LOGS_DIR,

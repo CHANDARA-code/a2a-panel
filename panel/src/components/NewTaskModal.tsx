@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
 import { Alert, App as AntApp, AutoComplete, Button, Drawer, Flex, Form, Input, Modal, Radio, Select, Tag, Typography, theme } from "antd";
 import { EyeOutlined, FileMarkdownOutlined } from "@ant-design/icons";
-import { api } from "../api";
-import type { DispatchInput, PresetSummary, PromptPreview, Role } from "../api";
+import { accountDisplayName, api } from "../api";
+import type { Account, DispatchInput, PresetSummary, PromptPreview, Provider, Role } from "../api";
+import { AccountStatusDot } from "./StatusTag";
+import { AccountAvatar } from "./AccountAvatar";
+import { ProviderIcon } from "./ProviderIcon";
 
 interface NewTaskModalProps {
   open: boolean;
@@ -14,7 +17,8 @@ interface NewTaskModalProps {
 
 const STORAGE_KEY = "a2a_panel_last_task";
 const EFFORT_LABELS: Record<string, string> = { low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max" };
-const DEFAULTS: DispatchInput = { role: "lead-software-engineer", workspace: "", prompt: "", mode: "plan", effort: "high" };
+const PROVIDER_NAMES: Record<string, string> = { agy: "Antigravity", claude: "Claude Code", codex: "Codex" };
+const DEFAULTS: DispatchInput = { role: "lead-software-engineer", workspace: "", prompt: "", mode: "plan", effort: "high", account: "agy" };
 const NO_PRESET = "__none__";
 
 type FormValues = Omit<DispatchInput, "preset"> & { preset: string };
@@ -22,7 +26,7 @@ type FormValues = Omit<DispatchInput, "preset"> & { preset: string };
 function loadRemembered(): Partial<DispatchInput> {
   try {
     const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}");
-    return { role: raw.role, workspace: raw.workspace, effort: raw.effort };
+    return { role: raw.role, workspace: raw.workspace, effort: raw.effort, account: raw.account };
   } catch {
     return {};
   }
@@ -35,6 +39,8 @@ export function NewTaskModal({ open, isMobile, initial, onClose, onCreated }: Ne
   const [roles, setRoles] = useState<Role[]>([]);
   const [efforts, setEfforts] = useState<string[]>(["low", "medium", "high", "xhigh", "max"]);
   const [workspaces, setWorkspaces] = useState<string[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [providers, setProviders] = useState<Provider[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [startValues, setStartValues] = useState<FormValues>({ ...DEFAULTS, preset: NO_PRESET });
@@ -67,6 +73,10 @@ export function NewTaskModal({ open, isMobile, initial, onClose, onCreated }: Ne
       setEfforts(r.efforts);
     }).catch(() => {});
     api.workspaces().then(setWorkspaces).catch(() => {});
+    api.accounts().then((r) => {
+      setAccounts(r.accounts);
+      setProviders(r.providers);
+    }).catch(() => {});
   }, [open, initial, form]);
 
   const showPreview = async () => {
@@ -102,9 +112,15 @@ export function NewTaskModal({ open, isMobile, initial, onClose, onCreated }: Ne
         prompt: values.prompt.trim(),
         workspace: values.workspace.trim(),
         preset: values.preset === NO_PRESET ? null : values.preset,
+        account: values.account,
       });
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({ role: values.role, workspace: values.workspace.trim(), effort: values.effort }));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({
+          role: values.role,
+          workspace: values.workspace.trim(),
+          effort: values.effort,
+          account: values.account,
+        }));
       } catch {}
       message.success("Task dispatched");
       onCreated(taskId);
@@ -115,9 +131,68 @@ export function NewTaskModal({ open, isMobile, initial, onClose, onCreated }: Ne
     }
   };
 
+  const accountGroups = (() => {
+    const providerIds: ("agy" | "claude" | "codex")[] = ["agy", "claude", "codex"];
+    return providerIds.map((pId) => {
+      const provider = providers.find((p) => p.id === pId);
+      const title = provider?.name || PROVIDER_NAMES[pId] || pId;
+      const groupAccounts = accounts.filter((a) => a.provider === pId);
+      return {
+        label: (
+          <Flex align="center" gap={6}>
+            <ProviderIcon provider={provider ?? pId} size={16} />
+            <span>{title}</span>
+          </Flex>
+        ),
+        options: groupAccounts.map((a) => ({
+          value: a.id,
+          label: accountDisplayName(a),
+          id: a.id,
+          state: a.status?.state ?? "unknown",
+        })),
+      };
+    }).filter((g) => g.options.length > 0);
+  })();
+
   const content = (
     <Form key={formKey} form={form} initialValues={startValues} layout="vertical" requiredMark={false} disabled={submitting}>
       {submitError && <Alert type="error" showIcon message={submitError} style={{ marginBottom: 16 }} />}
+      <Form.Item name="account" label="Account" rules={[{ required: true, message: "Select an account" }]}>
+        <Select
+          options={accountGroups.length > 0 ? accountGroups : [{
+            label: (
+              <Flex align="center" gap={6}>
+                <ProviderIcon providerId="agy" size={16} />
+                <span>Antigravity</span>
+              </Flex>
+            ),
+            options: [{ value: "agy", label: "Antigravity (default)", id: "agy", state: "signed-in" as const }],
+          }]}
+          labelRender={(props) => (
+            <Flex align="center" gap={6}>
+              <AccountAvatar accountId={String(props.value)} accounts={accounts} size={20} />
+              <span>{props.label}</span>
+            </Flex>
+          )}
+          optionRender={(option) => {
+            const item = option.data as unknown as { value?: string; label?: string; id?: string; state?: Account["status"]["state"] };
+            return (
+              <Flex align="center" justify="space-between" gap={8}>
+                <Flex align="center" gap={6}>
+                  <AccountAvatar accountId={item.value ?? item.id} accounts={accounts} size={20} />
+                  {item.state && <AccountStatusDot state={item.state} />}
+                  <Typography.Text>{item.label ?? ""}</Typography.Text>
+                </Flex>
+                {item.id && (
+                  <Typography.Text type="secondary" code style={{ fontSize: 11 }}>
+                    {item.id}
+                  </Typography.Text>
+                )}
+              </Flex>
+            );
+          }}
+        />
+      </Form.Item>
       <Form.Item name="role" label="Specialist" rules={[{ required: true, message: "Choose a specialist" }]}>
         <Select
           showSearch

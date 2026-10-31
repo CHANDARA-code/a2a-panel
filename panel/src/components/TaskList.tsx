@@ -5,6 +5,7 @@ import { StopOutlined } from "@ant-design/icons";
 import type { Task } from "../api";
 import { formatAgo, formatDateTime, formatDuration } from "../format";
 import { StatusTag } from "./StatusTag";
+import { AccountAvatar } from "./AccountAvatar";
 
 interface TaskListProps {
   tasks: Task[];
@@ -57,8 +58,12 @@ export function TaskList({ tasks, loading, isMobile, cancelling, onOpen, onCance
                 {formatAgo(task.startedAt)} · {formatDuration(task.durationMs)}
               </Typography.Text>
             </Flex>
-            <Flex align="center" gap={6} style={{ marginTop: 8 }}>
+            <Flex align="center" gap={6} wrap style={{ marginTop: 8 }}>
               <Typography.Text strong>{task.role}</Typography.Text>
+              <Tag style={{ marginInlineEnd: 0, display: "inline-flex", alignItems: "center", gap: 6, paddingInline: 6 }}>
+                <AccountAvatar accountId={task.account ?? "agy"} size={20} />
+                <span>{task.account ?? "agy"}</span>
+              </Tag>
               {task.preset && <Tag style={{ marginInlineEnd: 0 }}>{task.preset}</Tag>}
             </Flex>
             <Typography.Paragraph ellipsis={{ rows: 2 }} style={{ margin: "4px 0 0" }}>
@@ -92,11 +97,17 @@ export function TaskList({ tasks, loading, isMobile, cancelling, onOpen, onCance
       render: (_, task) => (
         <>
           <Typography.Text ellipsis style={{ display: "block" }}>{task.role}</Typography.Text>
-          {task.preset && (
-            <Tooltip title={`Preset: ${task.preset}`}>
-              <Tag style={{ marginTop: 4, marginInlineEnd: 0, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis" }}>{task.preset}</Tag>
-            </Tooltip>
-          )}
+          <Flex gap={4} wrap align="center" style={{ marginTop: 4 }}>
+            <Tag style={{ marginInlineEnd: 0, display: "inline-flex", alignItems: "center", gap: 6, paddingInline: 6 }}>
+              <AccountAvatar accountId={task.account ?? "agy"} size={20} />
+              <span>{task.account ?? "agy"}</span>
+            </Tag>
+            {task.preset && (
+              <Tooltip title={`Preset: ${task.preset}`}>
+                <Tag style={{ marginInlineEnd: 0, maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis" }}>{task.preset}</Tag>
+              </Tooltip>
+            )}
+          </Flex>
         </>
       ),
     },

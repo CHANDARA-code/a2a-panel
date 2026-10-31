@@ -13,6 +13,8 @@ const FAKE_AGENT = path.join(__dirname, 'fake-agy.sh');
 const instances = [];
 // Keep every server and in-process run away from the user's own presets (and their default preset).
 process.env.A2A_PRESETS_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'a2a-presets-'));
+process.env.A2A_ACCOUNTS_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'a2a-accounts-'));
+process.env.A2A_TEAMS_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'a2a-teams-'));
 
 function authed(extra = {}) {
   return { 'X-A2A-Token': TOKEN, 'Content-Type': 'application/json', ...extra };
@@ -368,7 +370,7 @@ const waitForLog = `
 test('in-memory task output is capped while the log keeps everything', async () => {
   const script = `
     ${waitForLog}
-    const { runAgyTask } = require(${JSON.stringify(path.join(ROOT, 'dispatcher.js'))});
+    const { runAgyTask } = require(${JSON.stringify(path.join(ROOT, 'src', 'dispatcher.js'))});
     runAgyTask({ role: 'web-engineer', prompt: 'x', workspace: process.argv[1], onDone: (t) => waitForLog(t.logFile, (log) => {
       console.log(JSON.stringify({ kept: t.output.length, total: t.outputChars, truncated: t.outputTruncated, logLength: log.length }));
     }) });
@@ -390,7 +392,7 @@ test('in-memory task output is capped while the log keeps everything', async () 
 function runInProcess(mode, extraEnv = {}, taskArgs = {}) {
   const script = `
     ${waitForLog}
-    const { runAgyTask } = require(${JSON.stringify(path.join(ROOT, 'dispatcher.js'))});
+    const { runAgyTask } = require(${JSON.stringify(path.join(ROOT, 'src', 'dispatcher.js'))});
     runAgyTask({ role: 'web-engineer', prompt: 'x', workspace: process.argv[1], ...JSON.parse(process.argv[2] || '{}'), onDone: (t) => waitForLog(t.logFile, (log) => {
       console.log(JSON.stringify({ status: t.status, error: t.error, verification: t.verification, output: t.output, usage: t.usage, conversationId: t.conversationId, changes: t.changes, log }));
     }) });
@@ -441,7 +443,7 @@ test('a git workspace reports what changed after the run', () => {
   execFileSync('git', ['-C', workspace, 'init', '-q']);
   fs.writeFileSync(path.join(workspace, 'new-file.txt'), 'hi');
   const script = `
-    const { runAgyTask } = require(${JSON.stringify(path.join(ROOT, 'dispatcher.js'))});
+    const { runAgyTask } = require(${JSON.stringify(path.join(ROOT, 'src', 'dispatcher.js'))});
     runAgyTask({ role: 'web-engineer', prompt: 'x', workspace: process.argv[1], onDone: (t) => console.log(JSON.stringify({ changes: t.changes })) });
   `;
   const out = execFileSync(process.execPath, ['-e', script, workspace], {
@@ -453,7 +455,7 @@ test('a git workspace reports what changed after the run', () => {
 
 test('conversation_id and model reject values that could act as flags', () => {
   const script = `
-    const { runAgyTask } = require(${JSON.stringify(path.join(ROOT, 'dispatcher.js'))});
+    const { runAgyTask } = require(${JSON.stringify(path.join(ROOT, 'src', 'dispatcher.js'))});
     for (const extra of [{ conversation_id: '--evil-flag-x' }, { model: '--evil' }]) {
       try { runAgyTask({ role: 'web-engineer', prompt: 'x', workspace: process.argv[1], ...extra }); console.log('accepted'); } catch (e) { console.log(e.message); }
     }
@@ -523,7 +525,7 @@ test('logs older than the retention window are pruned, recent ones kept', () => 
   const workspace = path.join(sandbox, 'ws');
   fs.mkdirSync(workspace);
   const script = `
-    const { runAgyTask } = require(${JSON.stringify(path.join(ROOT, 'dispatcher.js'))});
+    const { runAgyTask } = require(${JSON.stringify(path.join(ROOT, 'src', 'dispatcher.js'))});
     runAgyTask({ role: 'web-engineer', prompt: 'x', workspace: process.argv[1], onDone: () => console.log('done') });
   `;
   execFileSync(process.execPath, ['-e', script, workspace], {
@@ -602,7 +604,8 @@ test('the consistency check passes on this repo and fails when the role lists dr
     }
   }
   fs.cpSync(path.join(ROOT, 'personas'), path.join(copy, 'personas'), { recursive: true });
-  const mcp = path.join(copy, 'mcp-server.js');
+  fs.cpSync(path.join(ROOT, 'src'), path.join(copy, 'src'), { recursive: true });
+  const mcp = path.join(copy, 'src', 'mcp-server.js');
   fs.writeFileSync(mcp, fs.readFileSync(mcp, 'utf-8').replace("            'devops-engineer',\n", ''));
   const drifted = spawnSync(process.execPath, [script, copy], { encoding: 'utf-8' });
   assert.strictEqual(drifted.status, 1);
@@ -687,7 +690,8 @@ test('a dispatched task gets the default preset files scoped to its role, with w
   assert.match(webLog, /^Preset: team$/m);
   assert.match(webLog, /### USER PREFERENCES \(preset: team\)/);
   assert.match(webLog, /Use MUI for this repo/);
-  assert.ok(!webLog.includes('Ant Design 5'));
+  assert.ok(fs.readFileSync(path.join(ROOT, 'preset-templates', 'nestjs-react', 'frontend.md'), 'utf-8').includes('Do not add Tailwind'));
+  assert.ok(!webLog.includes('Do not add Tailwind'));
   assert.ok(!webLog.includes('#### api.md'));
 
   const apiTask = await dispatch(instance, { role: 'api-engineer' });
@@ -743,4 +747,30 @@ test('autostart enable --dry-run prints the login service without installing it'
     assert.match(out, /Environment="PATH=\/usr\/bin:\/bin"/);
   }
   assert.deepStrictEqual(fs.readdirSync(home), []);
+});
+
+test('the engineering-practices template sends the core file to every role and each domain file only to its roles', async () => {
+  const instance = await startInstance({ A2A_PRESETS_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'a2a-presets-')), A2A_PLUGINS_DIR: '/nonexistent-plugins-dir' });
+  assert.strictEqual((await api(instance, 'POST', '/api/presets', { id: 'practices', template: 'engineering-practices' })).status, 201);
+  const roles = (await (await fetch(`${instance.base}/api/roles`)).json()).roles.map((r) => r.id);
+  assert.strictEqual(roles.length, 13);
+  assert.ok(roles.includes('release-manager'));
+  const domain = {
+    'web.md': ['web-engineer', 'web-performance-auditor'],
+    'api.md': ['api-engineer'],
+    'mobile.md': ['mobile-engineer'],
+    'desktop.md': ['desktop-engineer'],
+    'testing.md': ['test-engineer', 'code-reviewer', 'lead-software-engineer'],
+    'debugging.md': ['bug-triager'],
+    'security.md': ['security-auditor', 'code-reviewer', 'api-engineer'],
+    'git.md': ['devops-engineer', 'lead-software-engineer', 'release-manager']
+  };
+  for (const role of roles) {
+    const preview = await api(instance, 'POST', '/api/prompt-preview', { role, preset: 'practices', prompt: 'x', workspace: instance.workspace });
+    const expected = ['core.md', ...Object.keys(domain).filter((file) => domain[file].includes(role))].sort();
+    assert.deepStrictEqual(preview.body.files.map((f) => f.name).sort(), expected, role);
+    assert.ok(!preview.body.prompt.includes('preferences truncated'), role);
+  }
+  const release = await api(instance, 'POST', '/api/prompt-preview', { role: 'release-manager', preset: 'practices', prompt: 'x', workspace: instance.workspace });
+  assert.match(release.body.prompt, /### YOUR ROLE \(release-manager\)\n# Release manager/);
 });

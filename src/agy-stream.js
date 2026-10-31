@@ -79,4 +79,4 @@ function createStreamParser({ onText, onLog, onInit, onResult }) {
   };
 }
 
-module.exports = { createStreamParser };
+module.exports = { createStreamParser, oneLine };

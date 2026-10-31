@@ -85,9 +85,15 @@
     },
     {
       "id": "devops-engineer",
-      "name": "DevOps & Release Engineer",
-      "description": "Owns deployment and operations: CI/CD pipelines, build and release automation, environment configuration, versioning, rollout and rollback plans, and monitoring setup. Flags irreversible steps before executing them.",
+      "name": "DevOps Engineer",
+      "description": "Owns build and operations: CI/CD pipelines, build automation, environment configuration, deployment, rollout and rollback plans, and monitoring setup. Flags irreversible steps before executing them. Versioning and publishing belong to release-manager.",
       "agy_agent": "devops-engineer"
+    },
+    {
+      "id": "release-manager",
+      "name": "Release Manager",
+      "description": "Prepares releases: semver version bumps, version consistency across manifests, changelogs, tags and package contents for npm, PyPI, Maven, CocoaPods, pub.dev, the App Store and Google Play. Runs dry-runs and stops before any irreversible publish, tag push or production deploy, reporting the exact command instead.",
+      "agy_agent": "release-manager"
     },
     {
       "id": "lead-software-engineer",

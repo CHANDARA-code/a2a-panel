@@ -1,6 +1,6 @@
 {
   "name": "a2a-panel",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Delegate coding work from Claude Code to a team of Google Antigravity (agy) specialists, with a web panel, token usage tracking and safe process control.",
   "author": "leavchandara",
   "repository": {
@@ -16,18 +16,21 @@
     "a2a-panel": "cli.js",
     "a2a": "cli.js"
   },
-  "main": "dispatcher.js",
+  "main": "src/dispatcher.js",
   "engines": {
     "node": ">=18"
   },
   "scripts": {
-    "test": "node --test test/server.test.js",
+    "test": "node --test test/server.test.js test/accounts.test.js test/teams.test.js test/usage.test.js test/provider-icons.test.js test/events.test.js test/updates.test.js",
     "check": "node scripts/check-consistency.js",
     "build:panel": "npm --prefix panel ci && npm --prefix panel run build",
     "prepack": "npm run build:panel"
   },
   "files": [
-    "*.js",
+    "cli.js",
+    "server.js",
+    "mcp-server.js",
+    "src",
     "agent-card.json",
     "agent.json",
     "personas",
