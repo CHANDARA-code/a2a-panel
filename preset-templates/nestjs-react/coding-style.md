@@ -1,10 +1,11 @@
 ---
 title: Coding style
 ---
-- TypeScript everywhere, `strict: true`. No `any`; use `unknown` and narrow it.
-- Names: `camelCase` for variables and functions, `PascalCase` for types, classes and React components, `kebab-case` for file names (`order-item.service.ts`).
+- In an existing codebase, its conventions win over this file where they differ; mention the difference in your report instead of rewriting code to match this file.
+- TypeScript everywhere with `strict: true`. No `any`: use `unknown` and narrow it. No non-null assertions (`!`) just to silence the compiler.
+- Names: `camelCase` for variables and functions, `PascalCase` for types, classes and React components, `kebab-case` file names (`order-item.service.ts`).
 - Prefer small pure functions and early returns over nested conditionals.
-- Comments explain *why*, not *what*. No commented-out code.
-- Formatting is Prettier defaults (single quotes, trailing commas, 2 spaces); lint with ESLint and fix all warnings you introduce.
+- Comments explain why, not what. No commented-out code.
+- Prettier with `singleQuote: true`, otherwise its defaults (trailing commas, 2 spaces), or the project's own Prettier config. ESLint with a flat config (`eslint.config.js`); fix every warning you introduce.
 - Keep a change focused: do not reformat or rename code unrelated to the task.
-- Commit messages use Conventional Commits (`feat:`, `fix:`, `test:`, `docs:`, `refactor:`).
+- Conventional Commits (`feat:`, `fix:`, `test:`, `docs:`, `refactor:`) when the task asks you to commit.

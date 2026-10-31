@@ -690,7 +690,8 @@ test('a dispatched task gets the default preset files scoped to its role, with w
   assert.match(webLog, /^Preset: team$/m);
   assert.match(webLog, /### USER PREFERENCES \(preset: team\)/);
   assert.match(webLog, /Use MUI for this repo/);
-  assert.ok(!webLog.includes('Ant Design 5'));
+  assert.ok(fs.readFileSync(path.join(ROOT, 'preset-templates', 'nestjs-react', 'frontend.md'), 'utf-8').includes('Do not add Tailwind'));
+  assert.ok(!webLog.includes('Do not add Tailwind'));
   assert.ok(!webLog.includes('#### api.md'));
 
   const apiTask = await dispatch(instance, { role: 'api-engineer' });

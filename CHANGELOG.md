@@ -28,6 +28,7 @@ All notable changes to a2a-panel are listed here. The format follows [Keep a Cha
 
 - The panel gets updates pushed over one event stream (`GET /api/events`) instead of polling, so an idle panel makes no repeating requests.
 - The web, API, mobile, desktop, bug-triager and code-reviewer personas spell out what to check before, during and after the work, and how to report it.
+- The `nestjs-react`, `nextjs-fullstack` and `flutter-mobile` preset templates follow the versions already in the project (`package.json`, `pubspec.lock`) and name the current majors for new projects (Ant Design 6, Next.js 16, NestJS 12, PostgreSQL 18, Riverpod 3, Freezed 3 or later) instead of older pinned ones. Each adds a `security.md` for its stack, a "Done means" check list, the stack pitfalls agents get wrong most often (unregistered NestJS modules, unauthenticated server actions, stale generated Dart code, Freezed 3 without `.when()`), and targets `release-manager`. Existing project conventions now take precedence over a template's style rules.
 - Source files moved into `src/`. `cli.js`, `server.js` and `mcp-server.js` stay at the top level as entry points that load `src/`, so existing start-at-login services, Claude Code MCP registrations and `node cli.js` commands keep working unchanged.
 
 ### Fixed
