@@ -4,6 +4,8 @@ All notable changes to a2a-panel are listed here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-31
+
 ### Added
 
 - Multiple accounts per agent CLI: Antigravity (`agy`), Claude Code (`claude`) and Codex (`codex`), each isolated in its own folder (per-account `HOME`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME`). Your existing sign-ins appear as the built-in default accounts, and adding an account never replaces one.
@@ -102,6 +104,7 @@ First release on npm.
 - Task logs show each tool call with its argument, failed tool steps, and actions `agy` denied.
 - `GET /tasks/:id` and JSON-RPC `tasks/get` return usage, verification, conversation id and changes for async tasks.
 
-[Unreleased]: https://github.com/CHANDARA-code/a2a-panel/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/CHANDARA-code/a2a-panel/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/CHANDARA-code/a2a-panel/releases/tag/v0.3.0
 [0.2.0]: https://github.com/CHANDARA-code/a2a-panel/releases/tag/v0.2.0
 [0.1.0]: https://www.npmjs.com/package/a2a-panel/v/0.1.0
