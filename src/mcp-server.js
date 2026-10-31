@@ -163,6 +163,7 @@ const TOOLS = [
             'web-performance-auditor',
             'solution-architect',
             'devops-engineer',
+            'release-manager',
             'lead-software-engineer'
           ]
         },

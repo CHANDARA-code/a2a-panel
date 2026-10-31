@@ -747,3 +747,29 @@ test('autostart enable --dry-run prints the login service without installing it'
   }
   assert.deepStrictEqual(fs.readdirSync(home), []);
 });
+
+test('the engineering-practices template sends the core file to every role and each domain file only to its roles', async () => {
+  const instance = await startInstance({ A2A_PRESETS_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'a2a-presets-')), A2A_PLUGINS_DIR: '/nonexistent-plugins-dir' });
+  assert.strictEqual((await api(instance, 'POST', '/api/presets', { id: 'practices', template: 'engineering-practices' })).status, 201);
+  const roles = (await (await fetch(`${instance.base}/api/roles`)).json()).roles.map((r) => r.id);
+  assert.strictEqual(roles.length, 13);
+  assert.ok(roles.includes('release-manager'));
+  const domain = {
+    'web.md': ['web-engineer', 'web-performance-auditor'],
+    'api.md': ['api-engineer'],
+    'mobile.md': ['mobile-engineer'],
+    'desktop.md': ['desktop-engineer'],
+    'testing.md': ['test-engineer', 'code-reviewer', 'lead-software-engineer'],
+    'debugging.md': ['bug-triager'],
+    'security.md': ['security-auditor', 'code-reviewer', 'api-engineer'],
+    'git.md': ['devops-engineer', 'lead-software-engineer', 'release-manager']
+  };
+  for (const role of roles) {
+    const preview = await api(instance, 'POST', '/api/prompt-preview', { role, preset: 'practices', prompt: 'x', workspace: instance.workspace });
+    const expected = ['core.md', ...Object.keys(domain).filter((file) => domain[file].includes(role))].sort();
+    assert.deepStrictEqual(preview.body.files.map((f) => f.name).sort(), expected, role);
+    assert.ok(!preview.body.prompt.includes('preferences truncated'), role);
+  }
+  const release = await api(instance, 'POST', '/api/prompt-preview', { role: 'release-manager', preset: 'practices', prompt: 'x', workspace: instance.workspace });
+  assert.match(release.body.prompt, /### YOUR ROLE \(release-manager\)\n# Release manager/);
+});

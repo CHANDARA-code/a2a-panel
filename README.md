@@ -4,7 +4,7 @@ Delegate coding work from **Claude Code** to a team of **Google Antigravity** (`
 
 Claude Code stays the team leader: it plans, splits the work and reviews the result. The heavy reading, editing and test running happens in Antigravity, so it uses your Antigravity quota instead of your Claude context. Claude reads back a short result: status, token usage, a `git` change summary and the tail of the output.
 
-- **12 specialist roles** that follow the software lifecycle: `solution-architect` (requirements and design), `web-engineer`, `api-engineer`, `mobile-engineer`, `desktop-engineer`, `lead-software-engineer`, `test-engineer`, `bug-triager`, `code-reviewer`, `security-auditor`, `web-performance-auditor`, `devops-engineer`.
+- **13 specialist roles** that follow the software lifecycle: `solution-architect` (requirements and design), `web-engineer`, `api-engineer`, `mobile-engineer`, `desktop-engineer`, `lead-software-engineer`, `test-engineer`, `bug-triager`, `code-reviewer`, `security-auditor`, `web-performance-auditor`, `devops-engineer`, `release-manager`.
 - **Web panel**: live logs, dispatch, cancel and re-run from the browser, with light and dark themes.
 - **Token usage**: real token counts from `agy`, per task and per role (`a2a-panel usage`).
 - **Safe process control**: cancel stops the whole process group; wall-clock and silence timeouts, a concurrency cap and bounded memory protect your machine.
@@ -79,7 +79,8 @@ Tasks run `agy` with `--dangerously-skip-permissions`, because headless `agy` ca
         |  [code-reviewer]          Multi-axis code review & logic      |
         |  [web-performance-auditor]Core Web Vitals & bundle profiling  |
         |  [solution-architect]     Requirements, SRS, HLD/LLD, task plan|
-        |  [devops-engineer]        CI/CD, release, rollout, monitoring |
+        |  [devops-engineer]        CI/CD, deploy, rollout, monitoring  |
+        |  [release-manager]        Versions, changelogs, publishing    |
         |  [lead-software-engineer] Complex multi-file implementations  |
         +---------------------------------------------------------------+
 ```
@@ -308,7 +309,13 @@ In the panel you edit `roles` with a specialist picker; you don't need to write 
 |---|---|
 | `presets/<id>/` in the data folder (`~/.a2a-panel/presets` for an npm install; the clone folder otherwise, git-ignored) | Your named presets: `preset.json` (title, description) and the `.md` files. Managed from the panel or the CLI. Override the folder with `A2A_PRESETS_DIR`. |
 | `<workspace>/.agy/preferences/*.md` | Optional, per repository, can be committed so the team shares it. A file here replaces the preset file with the same name, and it applies even when no preset is chosen. |
-| `preset-templates/` | Starter templates shipped with the bridge: `nestjs-react`, `nextjs-fullstack` and `flutter-mobile`. A new preset can copy one, then you edit it. |
+| `preset-templates/` | Starter templates shipped with the bridge: `nestjs-react`, `nextjs-fullstack`, `flutter-mobile` and `engineering-practices`. A new preset can copy one, then you edit it. |
+
+### Role instructions and the engineering-practices template
+
+Every task starts with its role's instructions (`### YOUR ROLE`). They come from an Antigravity plugin when one provides `agents/<role>.md` under `~/.gemini/config/plugins/` (or `A2A_PLUGINS_DIR`); otherwise from the bridge's own `personas/<role>.md`. A plugin agent replaces the bridge's persona for that role, and when several plugins provide the same role, the first plugin folder in alphabetical order wins.
+
+The `engineering-practices` template adds working discipline to the prompt: `core.md` (verify before claiming, never fabricate, read before editing, match the codebase, stop before irreversible steps) goes to every specialist, and one guide per area goes only to the roles that need it: `web.md`, `api.md`, `mobile.md`, `desktop.md`, `testing.md`, `debugging.md`, `security.md` and `git.md`. Each role receives at most about 6,500 characters of it. If your Antigravity plugins already give agy these practices as skills, you don't need this template.
 
 ### Which preset a task uses
 

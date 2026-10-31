@@ -75,7 +75,7 @@ Available Roles:
   web-engineer, api-engineer, mobile-engineer, desktop-engineer,
   test-engineer, bug-triager, security-auditor, code-reviewer,
   web-performance-auditor, solution-architect, devops-engineer,
-  lead-software-engineer
+  release-manager, lead-software-engineer
 `);
 }
 

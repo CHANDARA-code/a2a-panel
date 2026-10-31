@@ -14,6 +14,8 @@ All notable changes to a2a-panel are listed here. The format follows [Keep a Cha
 - Add account with provider logos: one click creates the account and starts sign-in; unfinished sign-ins are removed. Antigravity and Codex logos come from their editor extensions on your machine (`GET /api/providers/:id/icon`); Claude's logo is the Simple Icons glyph (CC0).
 - Teams: a leader account plans a goal into tasks for member accounts and roles, with plan-first review (instructions and check commands shown before you build), dependencies, a parallel limit, optional leader review, MCP tools `a2a_list_teams`, `a2a_run_team`, `a2a_get_team_run`, `a2a_cancel_team_run` and `a2a-panel teams` commands.
 - MCP tool `a2a_list_accounts`; CLI `a2a-panel accounts` commands.
+- Role `release-manager`: semver bumps, version consistency, changelogs and package contents; it runs dry-runs and stops before any irreversible publish, tag push or production deploy. `devops-engineer` now covers CI/CD, deployment and operations.
+- Preset template `engineering-practices`: a core working-discipline file for every role plus one guide per area (web, API, mobile, desktop, testing, debugging, security, git), each sent only to the roles that need it.
 - Per-account Usage Monitor (`src/usage.js`) tracking token budgets, usage records with models breakdown, and provider plan quota snapshots.
 - Quota snapshot extraction for Claude Code (`rate_limit_event` and `modelUsage`), Codex (`rate_limits` from task's own rollout file), and Antigravity (capacity exhaustion failure detection).
 - Account budgets with period windows (`day`, `week`, `month`) starting at 00:00 local time, and optional hard stop enforcement refusing tasks before spawn.
@@ -25,6 +27,7 @@ All notable changes to a2a-panel are listed here. The format follows [Keep a Cha
 ### Changed
 
 - The panel gets updates pushed over one event stream (`GET /api/events`) instead of polling, so an idle panel makes no repeating requests.
+- The web, API, mobile, desktop, bug-triager and code-reviewer personas spell out what to check before, during and after the work, and how to report it.
 - Source files moved into `src/`. `cli.js`, `server.js` and `mcp-server.js` stay at the top level as entry points that load `src/`, so existing start-at-login services, Claude Code MCP registrations and `node cli.js` commands keep working unchanged.
 
 ### Fixed
