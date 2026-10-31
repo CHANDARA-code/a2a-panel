@@ -2137,3 +2137,19 @@ test('a claim left behind by a killed process does not block building the plan',
     teamsModule.cancelRun(started.id);
   }
 });
+
+test('a leader plan whose task prompts contain code fences and braces is read correctly', () => {
+  const { parsePlan } = require('../teams');
+  const plan = {
+    summary: 'Two tasks: a settings view model and its tests.',
+    tasks: [
+      { id: 't1', title: 'View model', assignee: 'claude', role: 'mobile-engineer', prompt: 'Create the view model:\n```swift\nfinal class SettingsViewModel { var isDark = false }\n```\n\n1. Delete nothing.', depends_on: [] },
+      { id: 't2', title: 'Tests', assignee: 'claude', role: 'test-engineer', prompt: 'Test it with ```swift\nXCTAssertFalse(vm.isDark)\n``` and a "quoted } brace".', depends_on: ['t1'] }
+    ]
+  };
+  const output = 'I read the workspace {it is empty}.\n```json\n' + JSON.stringify(plan) + '\n```';
+  assert.deepStrictEqual(parsePlan(output), plan);
+  assert.deepStrictEqual(parsePlan(JSON.stringify(plan)), plan);
+  assert.throws(() => parsePlan('No plan here.'), /Could not find JSON/);
+  assert.throws(() => parsePlan('```json\n{"summary": "x", "tasks": [}\n```'), /Invalid JSON in leader output/);
+});

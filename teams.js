@@ -413,25 +413,45 @@ function getWorkspaceChanges(cwd) {
   return [status, stat].filter(Boolean).join('\n\n').slice(0, 2000);
 }
 
-function parsePlan(output) {
-  if (!output || typeof output !== 'string') throw new Error('No output from team leader');
-  let raw = null;
-  const matches = [...output.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)];
-  if (matches.length > 0) {
-    raw = matches[matches.length - 1][1].trim();
-  } else {
-    const first = output.indexOf('{');
-    const last = output.lastIndexOf('}');
-    if (first !== -1 && last > first) {
-      raw = output.slice(first, last + 1);
+function balancedObjectAt(text, start) {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+    } else if (ch === '"') {
+      inString = true;
+    } else if (ch === '{') {
+      depth++;
+    } else if (ch === '}') {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
     }
   }
-  if (!raw) throw new Error('Could not find JSON in leader output');
-  try {
-    return JSON.parse(raw);
-  } catch (err) {
-    throw new Error(`Invalid JSON in leader output: ${err.message}`);
+  return null;
+}
+
+function parsePlan(output) {
+  if (!output || typeof output !== 'string') throw new Error('No output from team leader');
+  let found = false;
+  let firstError = null;
+  for (let i = output.lastIndexOf('{'); i !== -1; i = i > 0 ? output.lastIndexOf('{', i - 1) : -1) {
+    const candidate = balancedObjectAt(output, i);
+    if (!candidate) continue;
+    found = true;
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Object.prototype.hasOwnProperty.call(parsed, 'tasks')) return parsed;
+    } catch (err) {
+      if (!firstError) firstError = err;
+    }
   }
+  if (!found) throw new Error('Could not find JSON in leader output');
+  throw new Error(`Invalid JSON in leader output: ${firstError ? firstError.message : 'no object with "tasks"'}`);
 }
 
 function memberAllowsRole(member, role) {

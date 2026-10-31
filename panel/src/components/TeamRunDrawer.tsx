@@ -142,12 +142,13 @@ export function TeamRunDrawer({ runId, open, isMobile, onClose, onOpenTask }: Te
     {
       title: "ID",
       dataIndex: "id",
-      width: 90,
+      width: 64,
       render: (id: string) => <Typography.Text code>{id}</Typography.Text>,
     },
     {
       title: "Title",
       dataIndex: "title",
+      width: 220,
       render: (title: string, task: TeamRunTask) => (
         <Flex vertical>
           <Typography.Text strong={Boolean(task.taskId)}>{title}</Typography.Text>
@@ -178,7 +179,7 @@ export function TeamRunDrawer({ runId, open, isMobile, onClose, onOpenTask }: Te
     {
       title: "Depends on",
       dataIndex: "depends_on",
-      width: 110,
+      width: 100,
       render: (deps: string[]) => (deps && deps.length ? deps.join(", ") : "-"),
     },
     {
@@ -190,7 +191,7 @@ export function TeamRunDrawer({ runId, open, isMobile, onClose, onOpenTask }: Te
     {
       title: "Error",
       dataIndex: "error",
-      width: 140,
+      width: 120,
       render: (err: string | null) => (err ? <Typography.Text type="danger" ellipsis>{err}</Typography.Text> : "-"),
     },
   ];
@@ -199,7 +200,7 @@ export function TeamRunDrawer({ runId, open, isMobile, onClose, onOpenTask }: Te
     <Drawer
       open={open}
       onClose={onClose}
-      size={isMobile ? "100%" : 780}
+      size={isMobile ? "100%" : 980}
       destroyOnHidden
       title={
         run ? (
@@ -407,6 +408,7 @@ export function TeamRunDrawer({ runId, open, isMobile, onClose, onOpenTask }: Te
                 columns={columns}
                 dataSource={run.tasks ?? []}
                 pagination={false}
+                scroll={{ x: "max-content" }}
                 expandable={{
                   expandedRowRender: (task) => <TaskPlanDetails task={task} />,
                   expandedRowKeys: expandedKeys ?? (run.status === "planned" ? (run.tasks ?? []).map((task) => task.id) : []),
