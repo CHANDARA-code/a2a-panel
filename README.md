@@ -4,6 +4,10 @@ Delegate coding work from **Claude Code** to a team of **Google Antigravity** (`
 
 Claude Code stays the team leader: it plans, splits the work and reviews the result. The heavy reading, editing and test running happens in Antigravity, so it uses your Antigravity quota instead of your Claude context. Claude reads back a short result: status, token usage, a `git` change summary and the tail of the output.
 
+**Watch the 2-minute overview** (with sound):
+
+https://github.com/user-attachments/assets/9fc3335d-5e1a-44a3-8db2-5e69468beff8
+
 - **13 specialist roles** that follow the software lifecycle: `solution-architect` (requirements and design), `web-engineer`, `api-engineer`, `mobile-engineer`, `desktop-engineer`, `lead-software-engineer`, `test-engineer`, `bug-triager`, `code-reviewer`, `security-auditor`, `web-performance-auditor`, `devops-engineer`, `release-manager`.
 - **Web panel**: live logs, dispatch, cancel and re-run from the browser, with light and dark themes.
 - **Token usage**: real token counts from `agy`, per task and per role (`a2a-panel usage`).
