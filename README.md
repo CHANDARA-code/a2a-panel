@@ -44,30 +44,34 @@ Tasks run `agy` with `--dangerously-skip-permissions`, because headless `agy` ca
 
 ## Architecture Overview
 
+You can steer the work from two places. Listener 1 is Claude Code at your desk. Listener 2 is a Telegram chat with your own bot, a remote harness for when you are away: it starts work, approves team plans and talks to your team leader (see [8. Telegram remote control](#8-telegram-remote-control)).
+
 ```
-                      +---------------------------------------+
-                      |         USER REQUEST / GOAL           |
-                      +---------------------------------------+
-                                          |
-                                          v
-                      +---------------------------------------+
-                      |       Claude Code (Team Leader)       |
-                      |   • High-Level Architecture           |
-                      |   • Requirements Decomposition        |
-                      |   • Code Review & Integration         |
-                      +---------------------------------------+
-                                          |
-                 +------------------------+------------------------+
-                 | A2A Protocol Bridge                             |
-                 | (Native MCP Stdio / HTTP / JSON-RPC 2.0)        |
-                 v                                                 v
-   +---------------------------+                     +---------------------------+
-   |   A2A MCP Stdio Server    |                     |  A2A HTTP/JSON-RPC Server |
-   |  (Direct inside Claude)   |                     |   (http://127.0.0.1:5188) |
-   +---------------------------+                     +---------------------------+
-                 \                                                 /
-                  \                                               /
-                   v                                             v
+   +-------------------------------+              +-------------------------------+
+   |  LISTENER 1: AT YOUR DESK     |              |  LISTENER 2: ON YOUR PHONE    |
+   |  Your goal, typed into        |              |  Telegram chat with your bot  |
+   |  Claude Code                  |              |  (remote command harness)     |
+   +-------------------------------+              +-------------------------------+
+                   |                                    |  /status /tasks /usage
+                   v                                    |  /run <role> <prompt>
+   +-------------------------------+                    |  /team <id> <goal>, /cancel
+   |  Claude Code (Team Leader)    |                    |  /do <text>, Build / Cancel
+   |  • High-Level Architecture    |                    |
+   |  • Requirements Decomposition |                    |  long polling: no open port,
+   |  • Code Review & Integration  |                    |  one chat, allowed users only
+   +-------------------------------+                    v
+                   |                     +-------------------------------------+
+                   | MCP stdio           |  A2A HTTP/JSON-RPC Server           |
+                   v                     |  (http://127.0.0.1:5188)            |
+   +-------------------------------+     |  • Telegram listener                |
+   |  A2A MCP Stdio Server         |---->|  • Leader inbox for /do messages    |
+   |  (Direct inside Claude)       |<----|  • Web panel, tasks, teams, usage   |
+   +-------------------------------+     +-------------------------------------+
+     a2a_notify_user: message you on Telegram, with answer buttons
+     a2a_wait_for_user: wait for your reply, /do text or button tap
+                   \                                    /
+                    \  a2a_dispatch_to_antigravity      /  /run, /team, panel, API
+                     v                                 v
         +---------------------------------------------------------------+
         |           ANTIGRAVITY SENIOR DEVELOPER TEAM (agy)             |
         |                                                               |
