@@ -3,7 +3,7 @@
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
-const { spawn, execFileSync } = require('child_process');
+const { spawn } = require('child_process');
 const { DATA_DIR, PACKAGE_ROOT } = require('./config');
 const { getAgentCard, runAgyTask, cancelTask, activeTasks, readUsageTotals } = require('./dispatcher');
 const presets = require('./presets');
@@ -11,6 +11,7 @@ const autostart = require('./autostart');
 const accounts = require('./accounts');
 const providers = require('./providers');
 const teams = require('./teams');
+const { execFileSyncCommand, isWindows } = require('./platform');
 
 const PORT = parseInt(process.env.A2A_PORT || '5188', 10);
 const HOST = process.env.A2A_HOST || '127.0.0.1';
@@ -166,6 +167,7 @@ async function handleServer(subcmd) {
 
     const child = spawn(process.execPath, [path.join(PACKAGE_ROOT, 'server.js')], {
       detached: true,
+      windowsHide: isWindows,
       stdio: ['ignore', outLog, errLog]
     });
     child.unref();
@@ -590,10 +592,10 @@ async function handleAccounts(args) {
       if (account.provider === 'agy') {
         console.log(`\nLaunching Antigravity sign-in for account "${id}".`);
         console.log('Please sign in in the interactive interface, then quit the CLI to return here.\n');
-        execFileSync(bin, [], { env, stdio: 'inherit' });
+        execFileSyncCommand(bin, [], { env, stdio: 'inherit' });
       } else {
         const cmdArgs = providers.loginArgs(account.provider, 'terminal');
-        execFileSync(bin, cmdArgs, { env, stdio: 'inherit' });
+        execFileSyncCommand(bin, cmdArgs, { env, stdio: 'inherit' });
       }
       const checked = await accounts.checkAccount(id);
       if (checked.status.state === 'signed-in') {
@@ -625,7 +627,7 @@ async function handleAccounts(args) {
       const cmdArgs = providers.logoutArgs(account.provider);
       const bin = providers.resolveBin(account.provider);
       const env = accounts.accountEnv(account);
-      execFileSync(bin, cmdArgs, { env, stdio: 'inherit' });
+      execFileSyncCommand(bin, cmdArgs, { env, stdio: 'inherit' });
       accounts.markSignedOut(id, 'Logged out');
       console.log(`Signed out account "${id}".`);
       return;
@@ -936,9 +938,35 @@ async function handleLogs(args) {
 
   if (follow) {
     console.log(`\x1b[36mStreaming ${path.basename(logPath)} (Ctrl+C to stop)...\x1b[0m\n`);
-    const tailProc = spawn('tail', ['-f', logPath], { stdio: 'inherit' });
+    let offset = 0;
+    const readNew = () => {
+      try {
+        if (!fs.existsSync(logPath)) return;
+        const size = fs.statSync(logPath).size;
+        if (size < offset) offset = 0;
+        if (size === offset) return;
+        const fd = fs.openSync(logPath, 'r');
+        try {
+          const buf = Buffer.alloc(size - offset);
+          fs.readSync(fd, buf, 0, buf.length, offset);
+          offset = size;
+          process.stdout.write(buf.toString('utf-8'));
+        } finally {
+          fs.closeSync(fd);
+        }
+      } catch (err) {}
+    };
+    readNew();
+    const timer = setInterval(readNew, 250);
+    let watcher = null;
+    try {
+      watcher = fs.watch(path.dirname(logPath), (_, name) => {
+        if (!name || name === path.basename(logPath)) readNew();
+      });
+    } catch (err) {}
     process.on('SIGINT', () => {
-      tailProc.kill();
+      clearInterval(timer);
+      if (watcher) watcher.close();
       process.exit(0);
     });
   } else {

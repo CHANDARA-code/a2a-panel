@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { execFile, execFileSync } = require('child_process');
+const { execFileCommand, isWindows } = require('./platform');
 const { getAgentCard, buildTaskPrompt, runAgyTask, cancelTask, isTaskProcessLive, readUsageTotals, LOGS_DIR, TASK_ID_PATTERN } = require('./dispatcher');
 const presets = require('./presets');
 const accounts = require('./accounts');
@@ -579,8 +579,11 @@ async function handleAccounts(req, res, method, pathname) {
         const bin = providers.resolveBin(p.id);
         let installed = false;
         try {
-          fs.accessSync(bin, fs.constants.X_OK);
-          installed = true;
+          const stat = fs.statSync(bin);
+          if (stat.isFile()) {
+            if (!isWindows) fs.accessSync(bin, fs.constants.X_OK);
+            installed = true;
+          }
         } catch (err) {}
         const icon = findProviderIcon(p.id);
         return {
@@ -671,7 +674,7 @@ async function handleAccounts(req, res, method, pathname) {
       const args = providers.logoutArgs(account.provider);
       const bin = providers.resolveBin(account.provider);
       const failure = await new Promise((resolve) => {
-        execFile(bin, args, { env: accounts.accountEnv(account), timeout: 30000 }, (err, stdout, stderr) => {
+        execFileCommand(bin, args, { env: accounts.accountEnv(account), timeout: 30000 }, (err, stdout, stderr) => {
           resolve(err ? (String(stderr || '').trim().split('\n').pop() || err.message) : null);
         });
       });

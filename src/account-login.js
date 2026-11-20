@@ -3,6 +3,7 @@ const path = require('path');
 const { spawn, execFileSync } = require('child_process');
 const { AccountError, getAccount, accountEnv, accountOverrides, checkAccount, saveAccount, getAccountsDir } = require('./accounts');
 const { PROVIDERS, resolveBin, loginArgs } = require('./providers');
+const { isWindows, spawnCommand, processExists, killProcessTree } = require('./platform');
 
 const sessions = new Map();
 const childProcesses = new Map();
@@ -29,6 +30,7 @@ function notifyLoginChange(session) {
 }
 
 function inTerminal(bin, args) {
+  if (isWindows) return { bin, args };
   if (process.platform === 'darwin') return { bin: 'sh', args: ['-c', 'cat | script -q /dev/null "$@" 2>&1 | cat', 'sh', bin, ...args] };
   return { bin: 'sh', args: ['-c', 'cat | script -qfec "$1" /dev/null 2>&1 | cat', 'sh', [bin, ...args].map(shellQuote).join(' ')] };
 }
@@ -106,6 +108,13 @@ function processGroupsUnder(rootPid) {
 
 function killProcessGroup(proc) {
   if (!proc || !proc.pid) return;
+  if (isWindows) {
+    killProcessTree(proc.pid, 'SIGTERM');
+    setTimeout(() => {
+      if (processExists(proc.pid)) killProcessTree(proc.pid, 'SIGKILL');
+    }, 3000).unref();
+    return;
+  }
   const groups = new Set([proc.pid, ...processGroupsUnder(proc.pid)]);
   const signalAll = (signal) => {
     for (const pgid of groups) {
@@ -122,6 +131,7 @@ function killProcessGroup(proc) {
 }
 
 function terminalStillRunning(rootPid) {
+  if (isWindows) return processExists(rootPid);
   let table = '';
   try {
     table = execFileSync('ps', ['-A', '-o', 'pid=,ppid=,command='], { encoding: 'utf-8' });
@@ -163,10 +173,14 @@ function purgeOldSessions() {
 
 function stopAllLogins() {
   for (const [loginId, child] of childProcesses) {
-    for (const pgid of new Set([child.pid, ...processGroupsUnder(child.pid)])) {
-      try {
-        process.kill(-pgid, 'SIGKILL');
-      } catch (err) {}
+    if (isWindows) {
+      killProcessTree(child.pid, 'SIGKILL');
+    } else {
+      for (const pgid of new Set([child.pid, ...processGroupsUnder(child.pid)])) {
+        try {
+          process.kill(-pgid, 'SIGKILL');
+        } catch (err) {}
+      }
     }
     const session = sessions.get(loginId);
     if (session && (session.state === 'starting' || session.state === 'waiting')) {
@@ -235,25 +249,39 @@ function startLogin(accountId, method) {
   sessionTimers.set(loginId, timers);
 
   if (method === 'terminal') {
-    const scriptFile = path.join(scratch, `${account.id}.command`);
-    const exportLines = Object.entries(overrides).map(([name, value]) => `export ${name}=${shellQuote(value)}\n`).join('');
-    const scriptContent = `#!/bin/sh\n${exportLines}exec ${[shellQuote(bin), ...args.map(shellQuote)].join(' ')}\n`;
-    fs.writeFileSync(scriptFile, scriptContent, { mode: 0o700 });
-
-    const candidates = process.platform === 'darwin'
-      ? [['open', [scriptFile]]]
-      : [['x-terminal-emulator', ['-e', scriptFile]], ['gnome-terminal', ['--', scriptFile]], ['konsole', ['-e', scriptFile]], ['xterm', ['-e', scriptFile]]];
-    const terminal = candidates.find(([name]) => onPath(name));
-    if (terminal) {
-      const proc = spawn(terminal[0], terminal[1], { detached: true, stdio: 'ignore' });
+    if (isWindows) {
+      const scriptFile = path.join(scratch, `${account.id}.cmd`);
+      const setLines = Object.entries(overrides).map(([name, value]) => `set "${name}=${String(value).replace(/"/g, '')}"\r\n`).join('');
+      const cmdLine = [bin, ...args].map((part) => `"${String(part).replace(/"/g, '')}"`).join(' ');
+      fs.writeFileSync(scriptFile, `@echo off\r\n${setLines}${cmdLine}\r\n`);
+      const proc = spawn(process.env.ComSpec || 'cmd.exe', ['/c', 'start', '""', scriptFile], { detached: true, stdio: 'ignore', windowsHide: true });
       proc.on('error', () => {
         session.terminalOpened = false;
         notifyLoginChange(session);
       });
       proc.unref();
+      session.terminalOpened = true;
+    } else {
+      const scriptFile = path.join(scratch, `${account.id}.command`);
+      const exportLines = Object.entries(overrides).map(([name, value]) => `export ${name}=${shellQuote(value)}\n`).join('');
+      const scriptContent = `#!/bin/sh\n${exportLines}exec ${[shellQuote(bin), ...args.map(shellQuote)].join(' ')}\n`;
+      fs.writeFileSync(scriptFile, scriptContent, { mode: 0o700 });
+
+      const candidates = process.platform === 'darwin'
+        ? [['open', [scriptFile]]]
+        : [['x-terminal-emulator', ['-e', scriptFile]], ['gnome-terminal', ['--', scriptFile]], ['konsole', ['-e', scriptFile]], ['xterm', ['-e', scriptFile]]];
+      const terminal = candidates.find(([name]) => onPath(name));
+      if (terminal) {
+        const proc = spawn(terminal[0], terminal[1], { detached: true, stdio: 'ignore' });
+        proc.on('error', () => {
+          session.terminalOpened = false;
+          notifyLoginChange(session);
+        });
+        proc.unref();
+      }
+      session.terminalOpened = Boolean(terminal);
     }
 
-    session.terminalOpened = Boolean(terminal);
     session.state = 'waiting';
     notifyLoginChange(session);
 
@@ -290,10 +318,10 @@ function startLogin(accountId, method) {
   const env = accountEnv(account);
   const needsTerminal = account.provider === 'agy' && method === 'browser';
   const launch = needsTerminal ? inTerminal(bin, args) : { bin, args };
-  const child = spawn(launch.bin, launch.args, {
+  const child = spawnCommand(launch.bin, launch.args, {
     env,
     cwd: scratch,
-    detached: true,
+    detached: !isWindows,
     stdio: ['pipe', 'pipe', 'pipe']
   });
   const codes = [];

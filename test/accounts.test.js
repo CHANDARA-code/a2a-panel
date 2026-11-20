@@ -9,9 +9,11 @@ const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
 const TOKEN = 'b'.repeat(64);
-const FAKE_AGY = path.join(__dirname, 'fake-agy.sh');
-const FAKE_CLAUDE = path.join(__dirname, 'fake-claude.sh');
-const FAKE_CODEX = path.join(__dirname, 'fake-codex.sh');
+const FAKE_EXT = process.platform === 'win32' ? '.cmd' : '.sh';
+const FAKE_AGY = path.join(__dirname, `fake-agy${FAKE_EXT}`);
+const FAKE_CLAUDE = path.join(__dirname, `fake-claude${FAKE_EXT}`);
+const FAKE_CODEX = path.join(__dirname, `fake-codex${FAKE_EXT}`);
+const { processRows } = require('../src/platform');
 const instances = [];
 process.env.A2A_TEAMS_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'a2a-teams-'));
 
@@ -224,7 +226,7 @@ test('agy account home layout (symlinks, Library without Keychains, .gemini/conf
   const targetHome = accountsModule.ensureAgyHome(account);
 
   assert.ok(fs.existsSync(path.join(targetHome, '.gitconfig')));
-  assert.strictEqual(fs.lstatSync(path.join(targetHome, '.gitconfig')).isSymbolicLink(), true);
+  if (process.platform !== 'win32') assert.strictEqual(fs.lstatSync(path.join(targetHome, '.gitconfig')).isSymbolicLink(), true);
 
   assert.strictEqual(fs.lstatSync(path.join(targetHome, 'Library')).isDirectory(), true);
   assert.strictEqual(fs.lstatSync(path.join(targetHome, 'Library')).isSymbolicLink(), false);
@@ -233,7 +235,8 @@ test('agy account home layout (symlinks, Library without Keychains, .gemini/conf
     assert.strictEqual(fs.lstatSync(path.join(targetHome, 'Library', 'Keychains')).isSymbolicLink(), false);
   }
   assert.strictEqual(fs.lstatSync(path.join(targetHome, 'Library', 'Preferences')).isSymbolicLink(), false);
-  assert.strictEqual(fs.lstatSync(path.join(targetHome, 'Library', 'Preferences', 'test.plist')).isSymbolicLink(), true);
+  assert.ok(fs.existsSync(path.join(targetHome, 'Library', 'Preferences', 'test.plist')));
+  if (process.platform !== 'win32') assert.strictEqual(fs.lstatSync(path.join(targetHome, 'Library', 'Preferences', 'test.plist')).isSymbolicLink(), true);
 
   assert.strictEqual(fs.lstatSync(path.join(targetHome, '.gemini')).isDirectory(), true);
   assert.strictEqual(fs.lstatSync(path.join(targetHome, '.gemini')).isSymbolicLink(), false);
@@ -260,7 +263,7 @@ test('agy account home layout (symlinks, Library without Keychains, .gemini/conf
   });
 
   const argsLogged = fs.readFileSync(main.argsFile, 'utf-8');
-  assert.match(argsLogged, new RegExp(`HOME: ${targetHome}`));
+  assert.ok(argsLogged.includes(`HOME: ${targetHome}`));
 });
 
 test('deleting an agy account leaves the fake real home intact', async () => {
@@ -322,7 +325,7 @@ test('claude task: text output, [tool] Bash: ... log line, normalised usage, con
   assert.match(logContent, /\[tool\] Bash: npm test/);
 
   const loggedArgs = fs.readFileSync(main.argsFile, 'utf-8');
-  assert.match(loggedArgs, /CLAUDE_CONFIG_DIR: .*\/c1\/claude/);
+  assert.match(loggedArgs, /CLAUDE_CONFIG_DIR: .*[\/\\]c1[\/\\]claude/);
   assert.match(loggedArgs, /ANTHROPIC_API_KEY_SET: no/);
   assert.match(loggedArgs, /STDIN: [\s\S]*Build new feature/);
   assert.match(loggedArgs, /--dangerously-skip-permissions/);
@@ -403,7 +406,7 @@ test('codex task: success parsing, and an auth-expired run marks the task failed
   assert.match(logContent, /\[tool\] shell: npm test/);
 
   const loggedArgs = fs.readFileSync(main.argsFile, 'utf-8');
-  assert.match(loggedArgs, /CODEX_HOME: .*\/cx1\/codex/);
+  assert.match(loggedArgs, /CODEX_HOME: .*[\/\\]cx1[\/\\]codex/);
   assert.match(loggedArgs, /OPENAI_API_KEY_SET: no/);
   assert.match(loggedArgs, /--dangerously-bypass-approvals-and-sandbox/);
   assert.match(loggedArgs, /model_reasoning_effort="xhigh"/);
@@ -892,14 +895,14 @@ test('auth words in the agent text do not sign the account out', async () => {
 });
 
 function runningCommands() {
-  return execFileSync('ps', ['-A', '-o', 'command='], { encoding: 'utf-8' }).split('\n').map((line) => line.trim());
+  return [...processRows(true).values()].map((r) => r.command);
 }
 
 test('a task can be cancelled while the bridge runs its verification command', async () => {
   const res = await fetch(`${main.base}/tasks/send`, {
     method: 'POST',
     headers: authed(),
-    body: JSON.stringify({ prompt: 'quick task', workspace: main.workspace, mode: 'plan', verification_command: 'sleep 31', async: true })
+    body: JSON.stringify({ prompt: 'quick task', workspace: main.workspace, mode: 'plan', verification_command: 'node -e "setTimeout(() => {}, 31000)"', async: true })
   });
   assert.strictEqual(res.status, 202);
   const { taskId } = await res.json();
@@ -908,7 +911,7 @@ test('a task can be cancelled while the bridge runs its verification command', a
   assert.strictEqual(cancel.status, 200);
   const task = await finishedTask(main, taskId);
   assert.strictEqual(task.status, 'cancelled');
-  await waitFor(() => !runningCommands().includes('sleep 31'));
+  await waitFor(() => !runningCommands().some((c) => c.includes('31000')));
 });
 
 test('an Antigravity sign-in prompt on stdout also stops the task and signs the account out', async () => {
@@ -972,9 +975,9 @@ test('cancelling a sign-in also kills a process that ignores SIGTERM', async () 
   const instance = await startInstance({ FAKE_CODEX_LOGIN_STUBBORN: seconds });
   await fetch(`${instance.base}/api/accounts`, { method: 'POST', headers: authed(), body: JSON.stringify({ id: 'cx-stub', provider: 'codex' }) });
   const { login } = await (await fetch(`${instance.base}/api/accounts/cx-stub/login`, { method: 'POST', headers: authed(), body: JSON.stringify({ method: 'device' }) })).json();
-  await waitFor(async () => runningCommands().includes(`sleep ${seconds}`));
+  await waitFor(async () => runningCommands().some((c) => c.includes(`sleep ${seconds}`)));
   await fetch(`${instance.base}/api/accounts/logins/${login.id}/cancel`, { method: 'POST', headers: authed() });
-  await waitFor(() => !runningCommands().includes(`sleep ${seconds}`));
+  await waitFor(() => !runningCommands().some((c) => c.includes(`sleep ${seconds}`)));
 });
 
 test('a Codex sign-in rejected by a task stays signed out until the stored credentials change', async () => {
@@ -1262,9 +1265,9 @@ test('stopping the server also stops its sign-in processes', async () => {
   const instance = await startInstance({ FAKE_CODEX_LOGIN_STUBBORN: seconds });
   await fetch(`${instance.base}/api/accounts`, { method: 'POST', headers: authed(), body: JSON.stringify({ id: 'cx-exit', provider: 'codex' }) });
   await fetch(`${instance.base}/api/accounts/cx-exit/login`, { method: 'POST', headers: authed(), body: JSON.stringify({ method: 'device' }) });
-  await waitFor(() => runningCommands().includes(`sleep ${seconds}`));
+  await waitFor(() => runningCommands().some((c) => c.includes(`sleep ${seconds}`)));
   instance.proc.kill('SIGTERM');
-  await waitFor(() => !runningCommands().includes(`sleep ${seconds}`));
+  await waitFor(() => !runningCommands().some((c) => c.includes(`sleep ${seconds}`)));
 });
 
 test('closing the sign-in while the new sign-in is being checked keeps it instead of cancelling it', async () => {
@@ -1305,12 +1308,12 @@ test('each account lists the models its own CLI offers, cached, with hidden and 
   fs.writeFileSync(path.join(cli, '.signed-in'), 'ok\n');
   const agy = await models('agy-models', '?refresh=1');
   assert.deepStrictEqual(agy.models, [{ id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro' }, { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash' }]);
-  assert.strictEqual(agy.source, 'fake-agy.sh models');
+  assert.strictEqual(agy.source, `fake-agy${FAKE_EXT} models`);
 
   fs.writeFileSync(instance.argsFile, '');
   const codex = await models('cx-models');
   assert.deepStrictEqual(codex.models.map((m) => m.id), ['gpt-test', 'gpt-test-mini']);
-  assert.match(fs.readFileSync(instance.argsFile, 'utf-8'), /CODEX_HOME: .*\/cx-models\/codex/);
+  assert.match(fs.readFileSync(instance.argsFile, 'utf-8'), /CODEX_HOME: .*[\/\\]cx-models[\/\\]codex/);
   await models('cx-models');
   assert.strictEqual(fs.readFileSync(instance.argsFile, 'utf-8').match(/ARGV: debug models/g).length, 1, 'the model list was not cached');
 

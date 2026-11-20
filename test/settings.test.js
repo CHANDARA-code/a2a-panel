@@ -41,7 +41,7 @@ async function startInstance(extraEnv = {}) {
     A2A_TEAMS_DIR: path.join(sandbox, 'teams'),
     A2A_REAL_HOME: path.join(sandbox, 'home'),
     A2A_UPDATE_CHECK: '0',
-    AGY_BIN: path.join(__dirname, 'fake-agy.sh'),
+    AGY_BIN: path.join(__dirname, process.platform === 'win32' ? 'fake-agy.cmd' : 'fake-agy.sh'),
     FAKE_AGY_MODE: 'busy',
     FAKE_AGY_BUSY_LINES: '120',
     ...extraEnv
@@ -104,7 +104,7 @@ test('settings list their defaults and sources, and saving writes a private file
   assert.strictEqual(after.A2A_LOG_RETENTION_DAYS.value, 30);
   assert.strictEqual(after.A2A_UPDATE_CHECK.source, 'env');
   const file = path.join(instance.sandbox, 'settings.json');
-  assert.strictEqual(fs.statSync(file).mode & 0o777, 0o600);
+  if (process.platform !== 'win32') assert.strictEqual(fs.statSync(file).mode & 0o777, 0o600);
   assert.strictEqual(JSON.parse(fs.readFileSync(file, 'utf-8')).A2A_TASK_TIMEOUT_MS, 1800000);
 
   assert.strictEqual((await put(instance, { A2A_TASK_TIMEOUT_MS: null })).status, 200);
@@ -203,7 +203,7 @@ test('an existing macOS login service file gets the interactive process type onc
       const second = autostart.upgradePlist();
       console.log(JSON.stringify({ fresh: fresh.includes('<key>ProcessType</key>'), first, second, same: fs.readFileSync(file, 'utf-8') === fresh }));
     `;
-    const out = JSON.parse(execFileSync(process.execPath, ['-e', script], { env: { ...process.env, HOME: home }, encoding: 'utf-8' }));
+    const out = JSON.parse(execFileSync(process.execPath, ['-e', script], { env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf-8' }));
     assert.deepStrictEqual(out, { fresh: true, first: true, second: false, same: true });
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
