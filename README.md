@@ -23,7 +23,7 @@ https://github.com/user-attachments/assets/9fc3335d-5e1a-44a3-8db2-5e69468beff8
 - Node.js 18 or newer
 - The Antigravity CLI (`agy`), installed and signed in
 - Claude Code (for the MCP integration)
-- macOS or Linux. Windows is not tested.
+- macOS, Linux, or Windows.
 
 ## Install
 
@@ -134,7 +134,7 @@ a2a-panel dashboard
 a2a-panel server start
 a2a-panel server stop
 
-# Start the daemon and dashboard automatically at login (macOS and Linux)
+# Start the daemon and dashboard automatically at login (macOS, Linux and Windows)
 a2a-panel autostart enable
 a2a-panel autostart            # status
 a2a-panel autostart disable
@@ -216,12 +216,12 @@ a2a-panel autostart enable
 
 This installs a per-user service and starts the server right away. It needs no `sudo`.
 
-| | macOS | Linux |
-|---|---|---|
-| Service | LaunchAgent `~/Library/LaunchAgents/com.a2a-panel.server.plist` | systemd user service `~/.config/systemd/user/a2a-panel.service` |
-| Starts | when you log in | when you log in, or at boot after `sudo loginctl enable-linger $USER` |
-| Logs | `~/Library/Logs/a2a-panel/server.log` and `server.err` (also in Console.app) | `server.log` and `server.err` in the data folder |
-| If it crashes | restarted automatically (after up to 30 seconds) | restarted automatically after 30 seconds |
+| | macOS | Linux | Windows |
+|---|---|---|---------|
+| Service | LaunchAgent `~/Library/LaunchAgents/com.a2a-panel.server.plist` | systemd user service `~/.config/systemd/user/a2a-panel.service` | Startup launcher `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\a2a-panel-server.vbs` |
+| Starts | when you log in | when you log in, or at boot after `sudo loginctl enable-linger $USER` | when you log in (toggleable in Task Manager → Startup apps) |
+| Logs | `~/Library/Logs/a2a-panel/server.log` and `server.err` (also in Console.app) | `server.log` and `server.err` in the data folder | `server.log` and `server.err` in the data folder |
+| If it crashes | restarted automatically (after up to 30 seconds) | restarted automatically after 30 seconds | starts once per login |
 
 Check it and control it:
 
