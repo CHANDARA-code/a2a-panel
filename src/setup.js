@@ -1,10 +1,10 @@
 const fs = require('fs');
 const path = require('path');
-const { execFileSync } = require('child_process');
 const { AGY_BIN, LOGS_DIR } = require('./dispatcher');
 const { DATA_DIR, PACKAGE_ROOT } = require('./config');
 const { resolveBin } = require('./providers');
 const { listAccounts } = require('./accounts');
+const { execFileSyncCommand } = require('./platform');
 
 const MCP_NAME = 'a2a-panel';
 const LEGACY_MCP_NAMES = ['agy-bridge', 'a2a-antigravity'];
@@ -12,7 +12,7 @@ const CLI_PATH = path.join(PACKAGE_ROOT, 'cli.js');
 
 function tryRun(file, args, timeout = 20000) {
   try {
-    const output = execFileSync(file, args, { encoding: 'utf-8', timeout, stdio: ['ignore', 'pipe', 'pipe'] });
+    const output = execFileSyncCommand(file, args, { encoding: 'utf-8', timeout, stdio: ['ignore', 'pipe', 'pipe'] });
     return { ok: true, output: output.trim() };
   } catch (err) {
     return { ok: false, output: String((err.stdout || '') + (err.stderr || '') || err.message).trim() };
@@ -20,7 +20,7 @@ function tryRun(file, args, timeout = 20000) {
 }
 
 function claudeMcpList() {
-  const result = tryRun('claude', ['mcp', 'list'], 60000);
+  const result = tryRun(resolveBin('claude'), ['mcp', 'list'], 60000);
   return result.ok ? result.output : null;
 }
 
@@ -118,7 +118,8 @@ function runInit({ dryRun = false } = {}) {
     console.log(printable);
     return true;
   }
-  const claude = tryRun('claude', ['--version']);
+  const claudeBin = resolveBin('claude');
+  const claude = tryRun(claudeBin, ['--version']);
   if (!claude.ok) {
     console.log('The "claude" command was not found. Install Claude Code, then run:\n\n  ' + printable + '\n');
     return false;
@@ -126,14 +127,14 @@ function runInit({ dryRun = false } = {}) {
   const listing = claudeMcpList();
   // Registrations under an old name of this project would start a second copy of the server.
   for (const name of legacyRegistrations(listing)) {
-    const removed = tryRun('claude', ['mcp', 'remove', name], 60000);
+    const removed = tryRun(claudeBin, ['mcp', 'remove', name], 60000);
     console.log(removed.ok ? `Removed the old "${name}" MCP registration.` : `Could not remove the old "${name}" MCP registration. Run: claude mcp remove ${name}`);
   }
   if (isRegistered(listing)) {
     console.log('a2a-panel is already registered with Claude Code.');
     return true;
   }
-  const result = tryRun(command[0], command.slice(1), 60000);
+  const result = tryRun(claudeBin, command.slice(1), 60000);
   if (!result.ok) {
     console.log('Registration failed:\n' + result.output + '\n\nRun this yourself:\n\n  ' + printable + '\n');
     return false;

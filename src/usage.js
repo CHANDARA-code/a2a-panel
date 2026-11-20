@@ -1,4 +1,5 @@
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 function getPeriodStart(period, now = new Date()) {
@@ -349,7 +350,7 @@ function findCodexRolloutRateLimits(account, conversationId) {
   const { accountFolder } = require('./accounts');
   let codexHome;
   if (account.system) {
-    codexHome = process.env.CODEX_HOME || path.join(process.env.HOME || '', '.codex');
+    codexHome = process.env.CODEX_HOME || path.join(process.env.HOME || os.homedir(), '.codex');
   } else {
     codexHome = accountFolder(account);
   }

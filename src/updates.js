@@ -1,8 +1,9 @@
 const fs = require('fs');
 const path = require('path');
-const { execFile, spawn } = require('child_process');
+const { spawn } = require('child_process');
 const { DATA_DIR, PACKAGE_ROOT } = require('./config');
 const settings = require('./settings');
+const { execFileCommand, spawnCommand, isWindows } = require('./platform');
 
 const PACKAGE = require('../package.json');
 const CHECK_TTL_MS = 6 * 60 * 60 * 1000;
@@ -82,7 +83,7 @@ function npmBin() {
 function resolveNpmGlobalRoot() {
   if (npmGlobalRoot !== undefined) return Promise.resolve(npmGlobalRoot);
   return new Promise((resolve) => {
-    execFile(npmBin(), ['root', '-g'], { timeout: 20000 }, (err, stdout) => {
+    execFileCommand(npmBin(), ['root', '-g'], { timeout: 20000 }, (err, stdout) => {
       npmGlobalRoot = err ? null : stdout.trim() || null;
       resolve(npmGlobalRoot);
     });
@@ -193,7 +194,7 @@ async function startUpdate() {
 
   const version = info.latest;
   setUpdateState({ state: 'installing', version, output: '', error: null, startedAt: new Date().toISOString(), finishedAt: null });
-  const child = spawn(npmBin(), ['install', '-g', `${PACKAGE.name}@${version}`], { env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawnCommand(npmBin(), ['install', '-g', `${PACKAGE.name}@${version}`], { env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
   let output = '';
   const collect = (chunk) => {
     output = (output + chunk.toString('utf-8')).slice(-4000);
@@ -218,7 +219,7 @@ async function startUpdate() {
       return;
     }
     setUpdateState({ state: 'restarting', output, finishedAt: new Date().toISOString() });
-    const restarter = spawn(process.execPath, [path.join(PACKAGE_ROOT, 'cli.js'), 'server', 'restart'], { detached: true, stdio: 'ignore', env: process.env });
+    const restarter = spawn(process.execPath, [path.join(PACKAGE_ROOT, 'cli.js'), 'server', 'restart'], { detached: true, windowsHide: isWindows, stdio: 'ignore', env: process.env });
     restarter.unref();
   });
   return versionInfo(info.install);

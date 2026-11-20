@@ -107,7 +107,7 @@ export function RunTeamModal({ open, team, isMobile, onClose, onRunCreated }: Ru
           label="Workspace path"
           rules={[
             { required: true, message: "Enter workspace folder" },
-            { pattern: /^\/\S.*$/, message: "Use an absolute path starting with /" },
+            { pattern: /^(\/|[A-Za-z]:[\\/]|\\\\)\S.*$/, message: "Use an absolute path (for example /home/me/project or C:\\Users\\me\\project)" },
           ]}
         >
           <AutoComplete
