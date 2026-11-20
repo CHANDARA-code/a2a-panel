@@ -40,9 +40,9 @@ async function startInstance() {
     A2A_TEAMS_DIR: path.join(sandbox, 'teams'),
     A2A_REAL_HOME: path.join(sandbox, 'home'),
     A2A_UPDATE_CHECK: '0',
-    AGY_BIN: path.join(__dirname, 'fake-agy.sh'),
-    CLAUDE_BIN: path.join(__dirname, 'fake-claude.sh'),
-    CODEX_BIN: path.join(__dirname, 'fake-codex.sh')
+    AGY_BIN: path.join(__dirname, process.platform === 'win32' ? 'fake-agy.cmd' : 'fake-agy.sh'),
+    CLAUDE_BIN: path.join(__dirname, process.platform === 'win32' ? 'fake-claude.cmd' : 'fake-claude.sh'),
+    CODEX_BIN: path.join(__dirname, process.platform === 'win32' ? 'fake-codex.cmd' : 'fake-codex.sh')
   };
   fs.mkdirSync(env.A2A_REAL_HOME, { recursive: true });
   fs.writeFileSync(env.A2A_TOKEN_FILE, TOKEN + '\n');

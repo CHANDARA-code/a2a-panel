@@ -128,9 +128,9 @@ async function startInstance(extraEnv = {}) {
     A2A_UPDATE_CHECK: '0',
     A2A_TELEGRAM_API: fake.base,
     A2A_TELEGRAM_POLL_SECONDS: '1',
-    AGY_BIN: path.join(__dirname, 'fake-agy.sh'),
-    CLAUDE_BIN: path.join(__dirname, 'fake-claude.sh'),
-    CODEX_BIN: path.join(__dirname, 'fake-codex.sh'),
+    AGY_BIN: path.join(__dirname, process.platform === 'win32' ? 'fake-agy.cmd' : 'fake-agy.sh'),
+    CLAUDE_BIN: path.join(__dirname, process.platform === 'win32' ? 'fake-claude.cmd' : 'fake-claude.sh'),
+    CODEX_BIN: path.join(__dirname, process.platform === 'win32' ? 'fake-codex.cmd' : 'fake-codex.sh'),
     FAKE_AGY_MODE: 'stream',
     FAKE_CLAUDE_MODE: 'stream',
     ...extraEnv
@@ -287,7 +287,7 @@ test('free text waits in the inbox for the team leader, and a waiting leader get
   const delivered = await waiting;
   assert.deepStrictEqual(delivered.body.messages.map((m) => m.text), ['ship it']);
   await sentAfter(before, /Delivered to your team leader/);
-  assert.strictEqual(fs.statSync(path.join(main.sandbox, 'telegram-inbox.json')).mode & 0o777, 0o600);
+  if (process.platform !== 'win32') assert.strictEqual(fs.statSync(path.join(main.sandbox, 'telegram-inbox.json')).mode & 0o777, 0o600);
 });
 
 test('the leader asks with buttons through MCP and reads the tapped answer', async () => {

@@ -8,9 +8,10 @@ const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
 const TOKEN = 'c'.repeat(64);
-const FAKE_AGY = path.join(__dirname, 'fake-agy.sh');
-const FAKE_CLAUDE = path.join(__dirname, 'fake-claude.sh');
-const FAKE_CODEX = path.join(__dirname, 'fake-codex.sh');
+const FAKE_EXT = process.platform === 'win32' ? '.cmd' : '.sh';
+const FAKE_AGY = path.join(__dirname, `fake-agy${FAKE_EXT}`);
+const FAKE_CLAUDE = path.join(__dirname, `fake-claude${FAKE_EXT}`);
+const FAKE_CODEX = path.join(__dirname, `fake-codex${FAKE_EXT}`);
 const instances = [];
 
 function authed(extra = {}) {
@@ -1506,7 +1507,7 @@ test('defect 4: stale overwrites with parallel tasks', async () => {
         role: 'api-engineer',
         prompt: 'Run task 2',
         acceptance_criteria: [],
-        verification_command: 'sleep 0.3',
+        verification_command: 'node -e "setTimeout(() => {}, 300)"',
         depends_on: []
       }
     ]

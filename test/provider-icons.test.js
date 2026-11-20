@@ -8,9 +8,10 @@ const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
 const TOKEN = 'c'.repeat(64);
-const FAKE_AGY = path.join(__dirname, 'fake-agy.sh');
-const FAKE_CLAUDE = path.join(__dirname, 'fake-claude.sh');
-const FAKE_CODEX = path.join(__dirname, 'fake-codex.sh');
+const FAKE_EXT = process.platform === 'win32' ? '.cmd' : '.sh';
+const FAKE_AGY = path.join(__dirname, `fake-agy${FAKE_EXT}`);
+const FAKE_CLAUDE = path.join(__dirname, `fake-claude${FAKE_EXT}`);
+const FAKE_CODEX = path.join(__dirname, `fake-codex${FAKE_EXT}`);
 
 const TINY_PNG_1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
 const TINY_PNG_2 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
@@ -176,15 +177,23 @@ test('path traversal escape is refused (404, iconUrl null)', async () => {
   }
 });
 
-test('symlink pointing outside the extension folder is refused (404, iconUrl null)', async () => {
-  const instance = await startInstance((realHome) => {
-    const extDir = path.join(realHome, '.cursor', 'extensions', 'google.google-antigravity-1.0.0');
-    fs.mkdirSync(path.join(extDir, 'img'), { recursive: true });
-    const outsideFile = path.join(realHome, 'outside.png');
-    fs.writeFileSync(outsideFile, TINY_PNG_1);
-    fs.symlinkSync(outsideFile, path.join(extDir, 'img', 'symlink.png'));
-    fs.writeFileSync(path.join(extDir, 'package.json'), JSON.stringify({ icon: 'img/symlink.png' }));
-  });
+test('symlink pointing outside the extension folder is refused (404, iconUrl null)', async (t) => {
+  let instance;
+  try {
+    instance = await startInstance((realHome) => {
+      const extDir = path.join(realHome, '.cursor', 'extensions', 'google.google-antigravity-1.0.0');
+      fs.mkdirSync(path.join(extDir, 'img'), { recursive: true });
+      const outsideFile = path.join(realHome, 'outside.png');
+      fs.writeFileSync(outsideFile, TINY_PNG_1);
+      fs.symlinkSync(outsideFile, path.join(extDir, 'img', 'symlink.png'));
+      fs.writeFileSync(path.join(extDir, 'package.json'), JSON.stringify({ icon: 'img/symlink.png' }));
+    });
+  } catch (err) {
+    if (process.platform === 'win32' && err.code === 'EPERM') {
+      return t.skip('file symlinks require Developer Mode or administrator privileges on Windows');
+    }
+    throw err;
+  }
 
   try {
     const iconRes = await fetch(`${instance.base}/api/providers/agy/icon`);

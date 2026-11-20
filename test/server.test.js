@@ -9,7 +9,9 @@ const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
 const TOKEN = 'a'.repeat(64);
-const FAKE_AGENT = path.join(__dirname, 'fake-agy.sh');
+const FAKE_EXT = process.platform === 'win32' ? '.cmd' : '.sh';
+const FAKE_AGENT = path.join(__dirname, `fake-agy${FAKE_EXT}`);
+const { listDescendants, processRows, killProcessTree } = require('../src/platform');
 const instances = [];
 // Keep every server and in-process run away from the user's own presets (and their default preset).
 process.env.A2A_PRESETS_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'a2a-presets-'));
@@ -40,12 +42,28 @@ function processAlive(pid) {
 }
 
 function descendantsMatching(rootPid, pattern) {
-  const out = execFileSync('ps', ['-A', '-o', 'pid=,pgid=,command='], { encoding: 'utf-8' });
-  return out
-    .split('\n')
-    .map((line) => line.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/))
-    .filter((m) => m && Number(m[2]) === rootPid && pattern.test(m[3]))
-    .map((m) => Number(m[1]));
+  const rows = processRows(true);
+  const children = new Map();
+  for (const [pid, row] of rows) {
+    if (!children.has(row.ppid)) children.set(row.ppid, []);
+    children.get(row.ppid).push(pid);
+  }
+  const pids = new Set([rootPid]);
+  const queue = [Number(rootPid)];
+  while (queue.length) {
+    for (const child of children.get(queue.shift()) || []) {
+      if (!pids.has(child)) {
+        pids.add(child);
+        queue.push(child);
+      }
+    }
+  }
+  const matched = [];
+  for (const pid of pids) {
+    const row = rows.get(pid);
+    if (row && pattern.test(row.command)) matched.push(pid);
+  }
+  return matched;
 }
 
 function freePort() {
@@ -133,12 +151,14 @@ after(() => {
       for (const file of fs.readdirSync(instance.logsDir).filter((f) => f.endsWith('.pid'))) {
         const pid = parseInt(fs.readFileSync(path.join(instance.logsDir, file), 'utf-8'), 10);
         try {
-          process.kill(-pid, 'SIGKILL');
+          killProcessTree(pid, 'SIGKILL');
         } catch (err) {}
       }
     } catch (err) {}
     instance.proc.kill('SIGKILL');
-    fs.rmSync(instance.sandbox, { recursive: true, force: true });
+    try {
+      fs.rmSync(instance.sandbox, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    } catch (err) {}
   }
 });
 
@@ -260,7 +280,7 @@ test('legacy REST cancel and JSON-RPC cancel use the same group-wide stop', asyn
             body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tasks/cancel', params: { taskId: body.taskId } })
           });
     assert.strictEqual(res.status, 200, via);
-    await waitFor(() => !processAlive(pid) && descendantsMatching(pid, /sleep 300/).length === 0);
+    await waitFor(() => !processAlive(pid) && descendantsMatching(pid, /sleep 300/).length === 0, 12000);
   }
 });
 
@@ -537,17 +557,17 @@ test('logs older than the retention window are pruned, recent ones kept', () => 
 });
 
 test('the bridge runs the verification command itself and a pass keeps the task completed', () => {
-  const { result, workspace } = runInProcess('stream', {}, { verification_command: 'pwd > ran-here.txt && exit 0' });
+  const { result, workspace } = runInProcess('stream', {}, { verification_command: 'node -e "require(\'fs\').writeFileSync(\'ran-here.txt\', process.cwd())"' });
   assert.strictEqual(result.status, 'completed');
   assert.strictEqual(result.verification.passed, true);
   assert.strictEqual(result.verification.exitCode, 0);
-  assert.strictEqual(fs.readFileSync(path.join(workspace, 'ran-here.txt'), 'utf-8').trim(), fs.realpathSync(workspace));
+  assert.strictEqual(fs.realpathSync(fs.readFileSync(path.join(workspace, 'ran-here.txt'), 'utf-8').trim()), fs.realpathSync(workspace));
   assert.match(result.log, /VERIFICATION PASSED/);
   assert.ok(result.log.indexOf('VERIFICATION PASSED') < result.log.indexOf('TASK FINISHED'));
 });
 
 test('a failing verification command marks an otherwise successful task failed and keeps the output', () => {
-  const { result } = runInProcess('stream', {}, { verification_command: 'echo boom-output; exit 3' });
+  const { result } = runInProcess('stream', {}, { verification_command: 'node -e "console.log(\'boom-output\'); process.exit(3)"' });
   assert.strictEqual(result.status, 'failed');
   assert.strictEqual(result.verification.passed, false);
   assert.strictEqual(result.verification.exitCode, 3);
@@ -556,7 +576,7 @@ test('a failing verification command marks an otherwise successful task failed a
 });
 
 test('a hung verification command is killed at the verify timeout', () => {
-  const { result } = runInProcess('stream', { A2A_VERIFY_TIMEOUT_MS: '300', A2A_KILL_ESCALATION_MS: '200' }, { verification_command: 'sleep 30' });
+  const { result } = runInProcess('stream', { A2A_VERIFY_TIMEOUT_MS: '300', A2A_KILL_ESCALATION_MS: '200' }, { verification_command: 'node -e "setTimeout(() => {}, 30000)"' });
   assert.strictEqual(result.status, 'failed');
   assert.strictEqual(result.verification.timedOut, true);
   assert.match(result.error, /Verification timed out/);
@@ -599,14 +619,14 @@ test('the consistency check passes on this repo and fails when the role lists dr
 
   const copy = fs.mkdtempSync(path.join(os.tmpdir(), 'a2a-consistency-'));
   for (const name of fs.readdirSync(ROOT)) {
-    if (name.endsWith('.js') || ['agent-card.json', 'agent.json', 'README.md', 'package.json'].includes(name)) {
+    if (name.endsWith('.js') || ['agent-card.json', 'agent.json', 'README.md', 'package.json', 'CHANGELOG.md'].includes(name)) {
       fs.copyFileSync(path.join(ROOT, name), path.join(copy, name));
     }
   }
   fs.cpSync(path.join(ROOT, 'personas'), path.join(copy, 'personas'), { recursive: true });
   fs.cpSync(path.join(ROOT, 'src'), path.join(copy, 'src'), { recursive: true });
   const mcp = path.join(copy, 'src', 'mcp-server.js');
-  fs.writeFileSync(mcp, fs.readFileSync(mcp, 'utf-8').replace("            'devops-engineer',\n", ''));
+  fs.writeFileSync(mcp, fs.readFileSync(mcp, 'utf-8').replace(/\s*'devops-engineer',\r?\n/, '\n'));
   const drifted = spawnSync(process.execPath, [script, copy], { encoding: 'utf-8' });
   assert.strictEqual(drifted.status, 1);
   assert.match(drifted.stderr, /role enum .* differs from agent-card\.json/);
@@ -731,9 +751,10 @@ test('an unknown preset is refused by every dispatch endpoint, and the prompt pr
 
 test('autostart enable --dry-run prints the login service without installing it', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'a2a-home-'));
+  const pathEnv = ['/usr/bin', '/bin', '/usr/bin'].join(path.delimiter);
   const out = execFileSync(process.execPath, [path.join(ROOT, 'cli.js'), 'autostart', 'enable', '--dry-run'], {
     encoding: 'utf-8',
-    env: { ...process.env, HOME: home, XDG_CONFIG_HOME: path.join(home, '.config'), A2A_PORT: '5999', PATH: `/usr/bin:/bin:/usr/bin` }
+    env: { ...process.env, HOME: home, USERPROFILE: home, APPDATA: home, XDG_CONFIG_HOME: path.join(home, '.config'), A2A_PORT: '5999', PATH: pathEnv }
   });
   assert.ok(out.includes(path.join(ROOT, 'server.js')));
   assert.ok(out.includes('A2A_PORT'));
@@ -741,6 +762,10 @@ test('autostart enable --dry-run prints the login service without installing it'
     assert.match(out, /com\.a2a-panel\.server\.plist/);
     assert.match(out, /<key>RunAtLoad<\/key>\s*<true\/>/);
     assert.match(out, /<string>\/usr\/bin:\/bin<\/string>/);
+  } else if (process.platform === 'win32') {
+    assert.match(out, /a2a-panel-server\.vbs/);
+    assert.match(out, /WScript\.Shell/);
+    assert.match(out, /procEnv\("PATH"\) = "\/usr\/bin;\/bin"/);
   } else {
     assert.match(out, /a2a-panel\.service/);
     assert.match(out, /WantedBy=default\.target/);
