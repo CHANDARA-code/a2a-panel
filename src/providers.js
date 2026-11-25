@@ -1,5 +1,6 @@
-const fs = require('fs');
+const os = require('os');
 const path = require('path');
+const { resolveExecutable, isWindows } = require('./platform');
 
 const MODEL_PATTERN = /^[A-Za-z0-9~][\w.:/~@+\[\]-]{0,127}$/;
 
@@ -33,18 +34,15 @@ const ENV_BIN_VARS = {
 function resolveBin(providerId) {
   const envVar = ENV_BIN_VARS[providerId];
   if (envVar && process.env[envVar]) return process.env[envVar];
-  const candidates = (process.env.PATH || '')
-    .split(path.delimiter)
-    .filter(Boolean)
-    .map((dir) => path.join(dir, providerId));
-  candidates.push(path.join(process.env.HOME || '', '.local', 'bin', providerId));
-  for (const candidate of candidates) {
-    try {
-      fs.accessSync(candidate, fs.constants.X_OK);
-      return candidate;
-    } catch (err) {}
+  const home = os.homedir();
+  const extraDirs = [path.join(home, '.local', 'bin')];
+  if (isWindows) {
+    const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+    const localAppData = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+    extraDirs.push(path.join(appData, 'npm'));
+    if (providerId === 'agy') extraDirs.push(path.join(localAppData, 'agy', 'bin'));
   }
-  return providerId;
+  return resolveExecutable(providerId, extraDirs);
 }
 
 function buildCommand(providerId, { prompt, mode, effort, model, conversationId, workspace }) {

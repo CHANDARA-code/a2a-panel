@@ -71,10 +71,10 @@ async function startInstance(extraEnv = {}) {
       A2A_PRESETS_DIR: path.join(sandbox, 'presets'),
       A2A_TEAMS_DIR: path.join(sandbox, 'teams'),
       A2A_REAL_HOME: home,
-      A2A_NPM_BIN: path.join(__dirname, 'fake-npm.sh'),
+      A2A_NPM_BIN: path.join(__dirname, process.platform === 'win32' ? 'fake-npm.cmd' : 'fake-npm.sh'),
       FAKE_NPM_ROOT: path.dirname(ROOT),
       FAKE_NPM_LOG: npmLog,
-      AGY_BIN: path.join(__dirname, 'fake-agy.sh'),
+      AGY_BIN: path.join(__dirname, process.platform === 'win32' ? 'fake-agy.cmd' : 'fake-agy.sh'),
       FAKE_AGY_MODE: 'stream',
       ...extraEnv
     },
@@ -100,7 +100,11 @@ after(() => {
         instance.proc.kill('SIGKILL');
       } catch (err) {}
     }
-    if (instance.sandbox) fs.rmSync(instance.sandbox, { recursive: true, force: true });
+    if (instance.sandbox) {
+      try {
+        fs.rmSync(instance.sandbox, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      } catch (err) {}
+    }
   }
 });
 

@@ -1,10 +1,10 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { execFile, execFileSync } = require('child_process');
 const { DATA_DIR } = require('./config');
 const { PROVIDERS, MODEL_PATTERN, statusCommand, parseStatus, resolveBin, logoutArgs } = require('./providers');
 const apiServices = require('./api-services');
+const { execFileCommand, execFileSyncCommand, isWindows } = require('./platform');
 
 const RESERVED_IDS = new Set(['agy', 'claude', 'codex', 'none', 'default', 'system', 'logins']);
 const ACCOUNT_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,47}$/;
@@ -180,6 +180,33 @@ function accountFolder(account) {
 
 const SECURITY_PREFS = 'com.apple.security.plist';
 
+function linkEntry(targetPath, linkPath) {
+  if (!isWindows) {
+    fs.symlinkSync(targetPath, linkPath);
+    return;
+  }
+  try {
+    const stat = fs.statSync(targetPath);
+    if (stat.isDirectory()) {
+      fs.symlinkSync(targetPath, linkPath, 'junction');
+      return;
+    }
+    try {
+      fs.symlinkSync(targetPath, linkPath);
+    } catch (err) {
+      if (err.code === 'EPERM') {
+        try {
+          fs.linkSync(targetPath, linkPath);
+        } catch (linkErr) {
+          fs.copyFileSync(targetPath, linkPath);
+        }
+      } else {
+        throw err;
+      }
+    }
+  } catch (err) {}
+}
+
 function mirrorEntries(sourceDir, targetDir, skip) {
   try {
     for (const name of fs.readdirSync(sourceDir)) {
@@ -189,7 +216,7 @@ function mirrorEntries(sourceDir, targetDir, skip) {
         fs.lstatSync(linkPath);
       } catch (err) {
         try {
-          fs.symlinkSync(path.join(sourceDir, name), linkPath);
+          linkEntry(path.join(sourceDir, name), linkPath);
         } catch (linkErr) {}
       }
     }
@@ -238,7 +265,7 @@ function ensureAgyHome(account) {
         const targetPath = path.join(realHome, name);
         if (!fs.existsSync(linkPath)) {
           try {
-            fs.symlinkSync(targetPath, linkPath);
+            linkEntry(targetPath, linkPath);
           } catch (err) {}
         }
       }
@@ -282,7 +309,7 @@ function ensureAgyHome(account) {
   const realConfig = path.join(realHome, '.gemini', 'config');
   if (fs.existsSync(realConfig) && !fs.existsSync(configLink)) {
     try {
-      fs.symlinkSync(realConfig, configLink);
+      linkEntry(realConfig, configLink);
     } catch (err) {}
   }
 
@@ -297,7 +324,10 @@ const REMOVED_ENV = {
 
 function accountOverrides(account) {
   if (account.system) return {};
-  if (account.provider === 'agy') return { HOME: ensureAgyHome(account) };
+  if (account.provider === 'agy') {
+    const home = ensureAgyHome(account);
+    return isWindows ? { HOME: home, USERPROFILE: home } : { HOME: home };
+  }
   const dir = accountFolder(account);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   if (account.provider === 'claude') return { CLAUDE_CONFIG_DIR: dir };
@@ -419,7 +449,7 @@ function validModel(model) {
 function signOutBeforeDelete(account) {
   if (account.apiKey || (account.provider !== 'claude' && account.provider !== 'codex')) return;
   try {
-    execFileSync(resolveBin(account.provider), logoutArgs(account.provider), { env: accountEnv(account), stdio: 'ignore', timeout: 20000 });
+    execFileSyncCommand(resolveBin(account.provider), logoutArgs(account.provider), { env: accountEnv(account), stdio: 'ignore', timeout: 20000 });
   } catch (err) {}
 }
 
@@ -538,6 +568,7 @@ function deleteAccount(id) {
     }
   }
   fs.rmSync(path.join(getAccountsDir(), '.sign-in', `${id}.command`), { force: true });
+  fs.rmSync(path.join(getAccountsDir(), '.sign-in', `${id}.cmd`), { force: true });
   const avatarDir = path.join(getAccountsDir(), '.avatars');
   for (const ext of AVATAR_EXTENSIONS) {
     try {
@@ -812,7 +843,7 @@ function listModels(id, { refresh = false } = {}) {
   const { modelsCommand, parseModels } = require('./providers');
   const command = modelsCommand(account.provider);
   const pending = new Promise((resolve) => {
-    execFile(command.bin, command.args, { env: accountEnv(account), timeout: 30000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => {
+    execFileCommand(command.bin, command.args, { env: accountEnv(account), timeout: 30000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => {
       const models = parseModels(account.provider, stdout || '').filter((model) => MODEL_PATTERN.test(model.id));
       const value = {
         account: id,
@@ -848,7 +879,7 @@ function checkAccount(id) {
     const env = accountEnv(account);
     const rejectedStamp = account.status && account.status.rejectedStamp;
 
-    execFile(bin, args, { env, timeout: 30000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+    execFileCommand(bin, args, { env, timeout: 30000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
       const exitCode = err ? (typeof err.code === 'number' ? err.code : 1) : 0;
       const parsed = parseStatus(account.provider, {
         exitCode,

@@ -25,4 +25,4 @@ A test should be able to fail: check that it fails against the code it covers be
 
 ## CI
 
-Every pull request runs `.github/workflows/ci.yml`: the checks above, a panel build, the tests on Ubuntu and macOS with Node 20 and 22, and a dependency audit (informational). See [RELEASING.md](RELEASING.md) for how releases are published.
+Every pull request runs `.github/workflows/ci.yml`: the checks above, a panel build, the tests on Ubuntu, macOS and Windows with Node 20 and 22, and a dependency audit (informational). See [RELEASING.md](RELEASING.md) for how releases are published.

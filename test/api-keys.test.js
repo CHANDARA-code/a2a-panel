@@ -59,9 +59,9 @@ async function startInstance() {
     A2A_REAL_HOME: home,
     A2A_UPDATE_CHECK: '0',
     A2A_API_CHECK_URL: fakeApi.url,
-    AGY_BIN: path.join(__dirname, 'fake-agy.sh'),
-    CLAUDE_BIN: path.join(__dirname, 'fake-claude.sh'),
-    CODEX_BIN: path.join(__dirname, 'fake-codex.sh'),
+    AGY_BIN: path.join(__dirname, process.platform === 'win32' ? 'fake-agy.cmd' : 'fake-agy.sh'),
+    CLAUDE_BIN: path.join(__dirname, process.platform === 'win32' ? 'fake-claude.cmd' : 'fake-claude.sh'),
+    CODEX_BIN: path.join(__dirname, process.platform === 'win32' ? 'fake-codex.cmd' : 'fake-codex.sh'),
     FAKE_ARGS_FILE: path.join(sandbox, 'fake_args.log'),
     FAKE_CLAUDE_MODE: 'stream',
     FAKE_CODEX_MODE: 'stream',
@@ -147,7 +147,7 @@ test('a DeepSeek key account is checked, never sends its key back, and runs Clau
   assert.ok(!accountsFile().includes(GOOD_KEY));
   const keyFile = path.join(main.sandbox, 'accounts', 'deepseek-1', 'api-key');
   assert.strictEqual(fs.readFileSync(keyFile, 'utf-8').trim(), GOOD_KEY);
-  assert.strictEqual(fs.statSync(keyFile).mode & 0o777, 0o600);
+  if (process.platform !== 'win32') assert.strictEqual(fs.statSync(keyFile).mode & 0o777, 0o600);
   assert.ok(!(await (await fetch(`${main.base}/api/accounts`)).text()).includes(GOOD_KEY));
 
   const models = await (await fetch(`${main.base}/api/accounts/deepseek-1/models`)).json();
@@ -230,7 +230,7 @@ test('a Kimi account on Codex gets its own provider config and key variable', as
   const logged = fs.readFileSync(main.env.FAKE_ARGS_FILE, 'utf-8');
   assert.match(logged, /A2A_PROVIDER_API_KEY_SET: yes/);
   assert.match(logged, /OPENAI_API_KEY_SET: no/);
-  assert.match(logged, /CODEX_HOME: .*kimi-codex-1\/codex/);
+  assert.match(logged, /CODEX_HOME: .*kimi-codex-1[\/\\]codex/);
 
   assert.strictEqual((await put('/api/accounts/kimi-codex-1', { model: 'kimi-other' })).status, 200);
   assert.match(fs.readFileSync(path.join(main.sandbox, 'accounts', 'kimi-codex-1', 'codex', 'config.toml'), 'utf-8'), /^model = "kimi-other"$/m);

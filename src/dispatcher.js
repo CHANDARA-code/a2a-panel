@@ -1,26 +1,24 @@
-const { spawn, execFileSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const { resolvePreferences } = require('./presets');
-const { MODEL_PATTERN, buildCommand, createParser, authFailurePattern, signInPromptPattern } = require('./providers');
+const { MODEL_PATTERN, resolveBin, buildCommand, createParser, authFailurePattern, signInPromptPattern } = require('./providers');
 const { resolveAccount, accountEnv, markSignedOut } = require('./accounts');
+const {
+  isWindows,
+  spawnCommand,
+  verificationShellCommand,
+  processRow,
+  processStart,
+  localeProcessStart,
+  isGroupAlive,
+  killProcessTree
+} = require('./platform');
 
 const { DATA_DIR, PACKAGE_ROOT } = require('./config');
 
-function resolveAgyBin() {
-  if (process.env.AGY_BIN) return process.env.AGY_BIN;
-  const candidates = (process.env.PATH || '').split(path.delimiter).filter(Boolean).map((dir) => path.join(dir, 'agy'));
-  candidates.push(path.join(process.env.HOME || '', '.local', 'bin', 'agy'));
-  for (const candidate of candidates) {
-    try {
-      fs.accessSync(candidate, fs.constants.X_OK);
-      return candidate;
-    } catch (err) {}
-  }
-  return 'agy';
-}
-
-const AGY_BIN = resolveAgyBin();
+const AGY_BIN = resolveBin('agy');
 const AGENT_CARD_PATH = fs.existsSync(path.join(PACKAGE_ROOT, 'agent-card.json'))
   ? path.join(PACKAGE_ROOT, 'agent-card.json')
   : path.join(PACKAGE_ROOT, 'agent.json');
@@ -68,57 +66,6 @@ function startMarkerPath(taskId) {
   return path.join(LOGS_DIR, `${taskId}.start`);
 }
 
-const PROCESS_TABLE_TTL_MS = 1000;
-const PS_ENV = { ...process.env, LC_ALL: 'C' };
-let processTable = { at: 0, rows: new Map() };
-
-function processRows(force = false) {
-  if (!force && Date.now() - processTable.at < PROCESS_TABLE_TTL_MS) return processTable.rows;
-  const rows = new Map();
-  try {
-    const out = execFileSync('ps', ['-A', '-o', 'pid=,lstart=,command='], { encoding: 'utf-8', maxBuffer: 16 * 1024 * 1024, env: PS_ENV });
-    for (const line of out.split('\n')) {
-      const match = line.match(/^\s*(\d+)\s+(\S+\s+\S+\s+\d+\s+[\d:]+\s+\d{4})\s+(.*)$/);
-      if (match) rows.set(Number(match[1]), { start: match[2], command: match[3].trim() });
-    }
-  } catch (err) {}
-  processTable = { at: Date.now(), rows };
-  return rows;
-}
-
-function processExists(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return err.code === 'EPERM';
-  }
-}
-
-const SINGLE_PROCESS_WINDOW_MS = 250;
-
-function singleProcessRow(id) {
-  try {
-    const out = execFileSync('ps', ['-p', String(id), '-o', 'pid=,lstart=,command='], { encoding: 'utf-8', env: PS_ENV });
-    const match = out.match(/^\s*(\d+)\s+(\S+\s+\S+\s+\d+\s+[\d:]+\s+\d{4})\s+(.*)$/m);
-    if (!match) return null;
-    const row = { start: match[2], command: match[3].trim() };
-    processTable.rows.set(id, row);
-    return row;
-  } catch (err) {
-    return null;
-  }
-}
-
-function processRow(pid) {
-  const id = Number(pid);
-  if (!Number.isInteger(id) || id <= 0 || !processExists(id)) return null;
-  const cached = processRows().get(id);
-  if (cached) return cached;
-  if (Date.now() - processTable.at < SINGLE_PROCESS_WINDOW_MS) return singleProcessRow(id);
-  return processRows(true).get(id) || null;
-}
-
 const sameStart = (a, b) => a.replace(/\s+/g, ' ').trim() === b.replace(/\s+/g, ' ').trim();
 
 function processCommand(pid) {
@@ -126,30 +73,14 @@ function processCommand(pid) {
   return row ? row.command : '';
 }
 
-function processStart(pid) {
-  try {
-    return execFileSync('ps', ['-p', String(pid), '-o', 'lstart='], { encoding: 'utf-8', env: PS_ENV }).trim();
-  } catch (err) {
-    return '';
-  }
-}
-
 function cachedProcessStart(pid) {
   const row = processRow(pid);
   return row ? row.start : '';
 }
 
-function localeProcessStart(pid) {
-  try {
-    return execFileSync('ps', ['-p', String(pid), '-o', 'lstart='], { encoding: 'utf-8' }).trim();
-  } catch (err) {
-    return '';
-  }
-}
-
 function startMatches(pid, recordedStart) {
   const current = cachedProcessStart(pid);
-  if (!current) return false;
+  if (!current) return !processRow(pid);
   return sameStart(current, recordedStart) || sameStart(localeProcessStart(pid), recordedStart);
 }
 
@@ -161,13 +92,8 @@ function readTaskStart(taskId) {
   }
 }
 
-function isGroupAlive(pid) {
-  try {
-    process.kill(-pid, 0);
-    return true;
-  } catch (err) {
-    return err.code === 'EPERM';
-  }
+function stripExeExt(name) {
+  return isWindows ? name.replace(/\.(exe|cmd|bat|com)$/i, '').toLowerCase() : name;
 }
 
 function commandRunsAgent(command) {
@@ -175,8 +101,10 @@ function commandRunsAgent(command) {
   if (process.env.AGY_BIN) bins.push(process.env.AGY_BIN);
   if (process.env.CLAUDE_BIN) bins.push(process.env.CLAUDE_BIN);
   if (process.env.CODEX_BIN) bins.push(process.env.CODEX_BIN);
-  const basenames = new Set(bins.map((b) => path.basename(b)));
-  return command.split(/\s+/).slice(0, 3).some((token) => basenames.has(path.basename(token)));
+  const basenames = new Set(bins.map((b) => stripExeExt(path.basename(b))));
+  const tokens = (command.match(/"[^"]*"|'[^']*'|\S+/g) || []).map((t) => t.replace(/["']/g, ''));
+  const limit = isWindows ? 8 : 3;
+  return tokens.slice(0, limit).some((token) => basenames.has(stripExeExt(path.basename(token).replace(/\.js$/i, ''))));
 }
 
 function verifyMarkerPath(taskId) {
@@ -198,43 +126,8 @@ function isTaskProcessLive(taskId, pid) {
   return isGroupAlive(pid);
 }
 
-function listDescendants(rootPid) {
-  let table = '';
-  try {
-    table = execFileSync('ps', ['-A', '-o', 'pid=,ppid='], { encoding: 'utf-8' });
-  } catch (err) {
-    return [];
-  }
-  const children = new Map();
-  for (const line of table.split('\n')) {
-    const [pid, ppid] = line.trim().split(/\s+/).map(Number);
-    if (!pid) continue;
-    if (!children.has(ppid)) children.set(ppid, []);
-    children.get(ppid).push(pid);
-  }
-  const found = [];
-  const queue = [rootPid];
-  while (queue.length) {
-    for (const child of children.get(queue.shift()) || []) {
-      found.push(child);
-      queue.push(child);
-    }
-  }
-  return found;
-}
-
 function signalTaskTree(pid, signal) {
-  try {
-    process.kill(-pid, signal);
-    return;
-  } catch (err) {
-    if (err.code !== 'ESRCH') throw err;
-  }
-  for (const target of [...listDescendants(pid), pid]) {
-    try {
-      process.kill(target, signal);
-    } catch (err) {}
-  }
+  killProcessTree(pid, signal);
 }
 
 function cancelTask(taskId) {
@@ -317,7 +210,7 @@ function countRunningTasks() {
 
 const NO_WORK_SIGNALS = /no output produced|do not have access to (?:command|file|direct)|does not provide direct file|no file[- ]write or terminal|not provisioned/i;
 
-const PLUGINS_DIR = process.env.A2A_PLUGINS_DIR || path.join(process.env.HOME || '', '.gemini', 'config', 'plugins');
+const PLUGINS_DIR = process.env.A2A_PLUGINS_DIR || path.join(process.env.HOME || os.homedir(), '.gemini', 'config', 'plugins');
 const PERSONAS_DIR = path.join(PACKAGE_ROOT, 'personas');
 const PERSONA_LIMIT = 6000;
 
@@ -356,7 +249,8 @@ function runVerification(command, cwd, logStream, taskId) {
     let tail = '';
     let timedOut = false;
     let settled = false;
-    const child = spawn('sh', ['-c', command], { cwd, env: { ...process.env }, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+    const vCmd = verificationShellCommand(command);
+    const child = spawnCommand(vCmd.bin, vCmd.args, { cwd, env: { ...process.env }, stdio: ['ignore', 'pipe', 'pipe'], detached: !isWindows, ...vCmd.options });
     const trackFiles = taskId && child.pid ? [`${taskId}.pid`, `${taskId}.start`, `${taskId}.verify`].map((file) => path.join(LOGS_DIR, file)) : [];
     if (trackFiles.length) {
       try {
@@ -613,11 +507,11 @@ function runAgyTask({ role, prompt, workspace, mode = 'accept-edits', effort = '
 
   activeTasks.set(taskId, taskRecord);
 
-  const proc = spawn(cmd.bin, cmd.args, {
+  const proc = spawnCommand(cmd.bin, cmd.args, {
     cwd: targetCwd,
     env,
     stdio: cmd.stdin !== null ? ['pipe', 'pipe', 'pipe'] : ['ignore', 'pipe', 'pipe'],
-    detached: true
+    detached: !isWindows
   });
 
   if (cmd.stdin !== null && proc.stdin) {

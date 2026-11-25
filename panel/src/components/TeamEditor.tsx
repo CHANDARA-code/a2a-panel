@@ -491,8 +491,8 @@ export function TeamEditor({ open, team, accounts, isMobile, onClose, onSaved }:
             {
               validator: (_, value: string) => {
                 if (!value || value.trim() === "") return Promise.resolve();
-                if (!value.trim().startsWith("/")) {
-                  return Promise.reject(new Error("Use an absolute path starting with /"));
+                if (!/^(\/|[A-Za-z]:[\\/]|\\\\)/.test(value.trim())) {
+                  return Promise.reject(new Error("Use an absolute path (for example /home/me/project or C:\\Users\\me\\project)"));
                 }
                 return Promise.resolve();
               },
